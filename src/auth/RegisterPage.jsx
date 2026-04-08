@@ -1,0 +1,143 @@
+// src/auth/RegisterPage.jsx
+import { useState } from "react";
+import { createUserWithEmailAndPassword } from "firebase/auth";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { useNavigate, Link } from "react-router-dom";
+import { auth, db } from "../firebase";
+
+export default function RegisterPage() {
+  const [form, setForm] = useState({
+    name: "", email: "", phone: "", password: "", confirm: "", role: "customer",
+  });
+  const [error, setError]   = useState("");
+  const [loading, setLoading] = useState(false);
+  const [showPass, setShowPass] = useState(false);
+  const navigate = useNavigate();
+
+  function set(k, v) { setForm(p => ({ ...p, [k]: v })); }
+
+  async function handleRegister(e) {
+    e.preventDefault();
+    setError("");
+    if (form.password !== form.confirm) { setError("Passwords do not match."); return; }
+    if (form.password.length < 6)       { setError("Password must be at least 6 characters."); return; }
+    if (!form.phone.trim())             { setError("Phone number is required."); return; }
+    setLoading(true);
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, form.email, form.password);
+      await setDoc(doc(db, "users", cred.user.uid), {
+        uid:       cred.user.uid,
+        name:      form.name.trim(),
+        email:     form.email.trim(),
+        phone:     form.phone.trim(),
+        role:      form.role,
+        createdAt: serverTimestamp(),
+      });
+      if (form.role === "admin") navigate("/admin/dashboard", { replace: true });
+      else                       navigate("/user/home",       { replace: true });
+    } catch (err) {
+      setError(friendlyError(err.code));
+    }
+    setLoading(false);
+  }
+
+  function friendlyError(code) {
+    switch (code) {
+      case "auth/email-already-in-use": return "This email is already registered.";
+      case "auth/invalid-email":        return "Invalid email address.";
+      case "auth/weak-password":        return "Password is too weak.";
+      default:                          return "Registration failed. Please try again.";
+    }
+  }
+
+  return (
+    <div className="auth-page">
+      <div className="auth-left">
+        <div className="auth-brand">
+          <div className="auth-brand-icon">🏓</div>
+          <h1 className="auth-brand-name">PicklePro</h1>
+          <p className="auth-brand-tagline">Facility Management System</p>
+        </div>
+        <div className="auth-left-features">
+          <div className="alf-item"><span className="alf-icon">🏆</span><span>Tournament Management</span></div>
+          <div className="alf-item"><span className="alf-icon">📅</span><span>Court Booking</span></div>
+          <div className="alf-item"><span className="alf-icon">💳</span><span>Payment Processing</span></div>
+          <div className="alf-item"><span className="alf-icon">📊</span><span>Analytics Dashboard</span></div>
+        </div>
+      </div>
+
+      <div className="auth-right">
+        <div className="auth-card">
+          <div className="auth-card-header">
+            <h2 className="auth-card-title">Create account</h2>
+            <p className="auth-card-sub">Join PicklePro today</p>
+          </div>
+
+          <form className="auth-form" onSubmit={handleRegister}>
+            <div className="af-row">
+              <div className="af-group">
+                <label className="af-label">Full name</label>
+                <input className="af-input" type="text" value={form.name}
+                  onChange={e=>set("name",e.target.value)} placeholder="Juan dela Cruz" required/>
+              </div>
+              <div className="af-group">
+                <label className="af-label">Phone number</label>
+                <input className="af-input" type="tel" value={form.phone}
+                  onChange={e=>set("phone",e.target.value)} placeholder="09XX XXX XXXX" required/>
+              </div>
+            </div>
+
+            <div className="af-group">
+              <label className="af-label">Email address</label>
+              <input className="af-input" type="email" value={form.email}
+                onChange={e=>set("email",e.target.value)} placeholder="you@example.com" required/>
+            </div>
+
+            <div className="af-row">
+              <div className="af-group">
+                <label className="af-label">Password</label>
+                <div className="af-input-wrap">
+                  <input className="af-input" type={showPass?"text":"password"} value={form.password}
+                    onChange={e=>set("password",e.target.value)} placeholder="Min. 6 characters" required/>
+                  <button type="button" className="af-eye" onClick={()=>setShowPass(p=>!p)}>
+                    {showPass?"🙈":"👁️"}
+                  </button>
+                </div>
+              </div>
+              <div className="af-group">
+                <label className="af-label">Confirm password</label>
+                <input className="af-input" type="password" value={form.confirm}
+                  onChange={e=>set("confirm",e.target.value)} placeholder="Repeat password" required/>
+              </div>
+            </div>
+
+            <div className="af-group">
+              <label className="af-label">Account type</label>
+              <div className="af-role-row">
+                {["customer","admin"].map(r=>(
+                  <button key={r} type="button"
+                    className={`af-role-btn ${form.role===r?"active":""}`}
+                    onClick={()=>set("role",r)}>
+                    <span>{r==="admin"?"🔧":"🎾"}</span>
+                    <span>{r==="admin"?"Administrator":"Player"}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {error && <div className="af-error"><span>⚠</span>{error}</div>}
+
+            <button className="af-submit" type="submit" disabled={loading}>
+              {loading ? <span className="af-spinner"/> : "Create Account"}
+            </button>
+          </form>
+
+          <div className="auth-card-footer">
+            Already have an account?{" "}
+            <Link to="/login" className="auth-link">Sign in</Link>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

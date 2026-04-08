@@ -1,0 +1,166 @@
+// src/admin/PaymentReview.jsx
+import { useState, useEffect } from "react";
+import {
+  collection, query, orderBy, onSnapshot,
+  doc, updateDoc, Timestamp,
+} from "firebase/firestore";
+import { db } from "../firebase";
+
+export default function PaymentReview() {
+  const [payments, setPayments] = useState([]);
+  const [filter, setFilter]     = useState("All");
+  const [search, setSearch]     = useState("");
+  const [loading, setLoading]   = useState(true);
+  const [acting, setActing]     = useState(null);
+  const [preview, setPreview]   = useState(null); // { payment, imageUrl }
+
+  useEffect(() => {
+    const q = query(collection(db,"payments"), orderBy("createdAt","desc"));
+    const unsub = onSnapshot(q, snap => {
+      setPayments(snap.docs.map(d=>({id:d.id,...d.data()})));
+      setLoading(false);
+    });
+    return () => unsub();
+  }, []);
+
+  async function setStatus(id, status) {
+    setActing(id);
+    try {
+      await updateDoc(doc(db,"payments",id), {
+        paymentStatus: status,
+        reviewedAt: Timestamp.now(),
+      });
+    } catch(err) { console.error(err); }
+    setActing(null);
+    setPreview(null);
+  }
+
+  const filtered = payments.filter(p => {
+    const matchFilter = filter==="All" || p.paymentStatus===filter;
+    const matchSearch = !search ||
+      p.name?.toLowerCase().includes(search.toLowerCase()) ||
+      p.method?.toLowerCase().includes(search.toLowerCase());
+    return matchFilter && matchSearch;
+  });
+
+  const counts = {
+    All:      payments.length,
+    Pending:  payments.filter(p=>p.paymentStatus==="Pending").length,
+    Approved: payments.filter(p=>p.paymentStatus==="Approved").length,
+    Rejected: payments.filter(p=>p.paymentStatus==="Rejected").length,
+  };
+
+  const statusColor = { Pending:"pending", Approved:"approved", Rejected:"rejected" };
+
+  if (loading) return <div className="ad-loading"><div className="ad-spinner"/></div>;
+
+  return (
+    <div className="ad-page">
+      <div className="ad-page-header">
+        <div>
+          <h1 className="ad-page-title">Payment Review</h1>
+          <p className="ad-page-sub">Review payment screenshots and approve or reject payments.</p>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="ad-filter-tabs">
+        {Object.entries(counts).map(([k,v])=>(
+          <button key={k} className={`ad-filter-tab ${filter===k?"active":""}`} onClick={()=>setFilter(k)}>
+            {k} <span className="ad-filter-count">{v}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="ad-search-row">
+        <input className="ad-search" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by name or method..."/>
+        <span className="ad-count">{filtered.length} payment{filtered.length!==1?"s":""}</span>
+      </div>
+
+      {/* Payment cards */}
+      <div className="pr-grid">
+        {filtered.length===0 && <div className="ad-empty">No payments found.</div>}
+        {filtered.map(p=>(
+          <div key={p.id} className="pr-card">
+            {/* Screenshot preview */}
+            <div className="pr-img-wrap" onClick={()=>setPreview(p)}>
+              {p.paymentImageUrl ? (
+                <img src={p.paymentImageUrl} alt="Payment" className="pr-img"/>
+              ) : (
+                <div className="pr-no-img">No image</div>
+              )}
+              <div className="pr-img-overlay">🔍 View</div>
+            </div>
+
+            <div className="pr-info">
+              <div className="pr-name">{p.name ?? "Unknown"}</div>
+              <div className="pr-meta">
+                <span>💳 {p.method ?? "—"}</span>
+                <span>₱{p.amount ?? "—"}</span>
+              </div>
+              <div className="pr-meta">
+                <span>📅 {p.date ?? "—"}</span>
+                <span>🏟️ {p.courtName ?? p.courtId ?? "—"}</span>
+              </div>
+              <span className={`ad-badge ad-badge-${statusColor[p.paymentStatus]??"pending"}`}>
+                {p.paymentStatus ?? "Pending"}
+              </span>
+            </div>
+
+            <div className="pr-actions">
+              {p.paymentStatus !== "Approved" && (
+                <button className="ad-btn ad-btn-success ad-btn-sm"
+                  disabled={acting===p.id}
+                  onClick={()=>setStatus(p.id,"Approved")}>
+                  ✓ Approve
+                </button>
+              )}
+              {p.paymentStatus !== "Rejected" && (
+                <button className="ad-btn ad-btn-danger ad-btn-sm"
+                  disabled={acting===p.id}
+                  onClick={()=>setStatus(p.id,"Rejected")}>
+                  ✕ Reject
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Image preview modal */}
+      {preview && (
+        <div className="ad-modal-backdrop" onClick={()=>setPreview(null)}>
+          <div className="pr-preview-modal" onClick={e=>e.stopPropagation()}>
+            <div className="ad-modal-header">
+              <h3>Payment Screenshot — {preview.name}</h3>
+              <button className="ad-modal-close" onClick={()=>setPreview(null)}>✕</button>
+            </div>
+            <div className="pr-preview-body">
+              {preview.paymentImageUrl ? (
+                <img src={preview.paymentImageUrl} alt="Payment screenshot" className="pr-preview-img"/>
+              ) : (
+                <div className="pr-no-img" style={{height:200}}>No image uploaded</div>
+              )}
+              <div className="ad-detail-grid" style={{marginTop:"1rem"}}>
+                <div className="ad-detail-row"><span>Name</span><strong>{preview.name}</strong></div>
+                <div className="ad-detail-row"><span>Amount</span><strong>₱{preview.amount}</strong></div>
+                <div className="ad-detail-row"><span>Method</span><strong>{preview.method}</strong></div>
+                <div className="ad-detail-row"><span>Court</span><strong>{preview.courtName??preview.courtId}</strong></div>
+                <div className="ad-detail-row"><span>Date</span><strong>{preview.date}</strong></div>
+                <div className="ad-detail-row"><span>Time</span><strong>{preview.timeSlot}</strong></div>
+              </div>
+            </div>
+            <div className="ad-modal-footer">
+              {preview.paymentStatus !== "Approved" && (
+                <button className="ad-btn ad-btn-success" onClick={()=>setStatus(preview.id,"Approved")}>✓ Approve Payment</button>
+              )}
+              {preview.paymentStatus !== "Rejected" && (
+                <button className="ad-btn ad-btn-danger" onClick={()=>setStatus(preview.id,"Rejected")}>✕ Reject Payment</button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
