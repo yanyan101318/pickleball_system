@@ -1,5 +1,6 @@
 // src/admin/CourtManager.jsx
 import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import {
   collection, addDoc, updateDoc, deleteDoc,
   doc, onSnapshot, serverTimestamp, query, orderBy,
@@ -31,6 +32,18 @@ export default function CourtManager() {
   function openEdit(c) { setForm({...c, amenities: Array.isArray(c.amenities)?c.amenities.join(", "):c.amenities??""}); setEditId(c.id); setShowForm(true); }
   function closeForm() { setShowForm(false); setEditId(null); }
 
+  async function logCourtActivity(title, description) {
+    try {
+      await addDoc(collection(db, "activityLogs"), {
+        title,
+        description,
+        createdAt: serverTimestamp(),
+      });
+    } catch (err) {
+      console.error("Activity log failed:", err);
+    }
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     setLoading(true);
@@ -44,8 +57,16 @@ export default function CourtManager() {
     try {
       if (editId) {
         await updateDoc(doc(db,"courts",editId), payload);
+        await logCourtActivity(
+          "Court Updated",
+          `“${payload.name}” — price ₱${payload.pricePerHour}/hr${payload.isActive ? "" : " (inactive)"}`
+        );
       } else {
         await addDoc(collection(db,"courts"), { ...payload, createdAt: serverTimestamp() });
+        await logCourtActivity(
+          "Court Added",
+          `“${payload.name}” added at ₱${payload.pricePerHour}/hr`
+        );
       }
       closeForm();
     } catch(err) { console.error(err); }
@@ -55,12 +76,21 @@ export default function CourtManager() {
   async function handleDelete(id) {
     if (!window.confirm("Delete this court?")) return;
     setDeleting(id);
-    try { await deleteDoc(doc(db,"courts",id)); } catch(err){ console.error(err); }
+    const name = courts.find((c) => c.id === id)?.name || "Court";
+    try {
+      await deleteDoc(doc(db,"courts",id));
+      await logCourtActivity("Court Deleted", `“${name}” was removed`);
+    } catch(err){ console.error(err); }
     setDeleting(null);
   }
 
   async function toggleActive(court) {
-    await updateDoc(doc(db,"courts",court.id), { isActive: !court.isActive });
+    const next = !court.isActive;
+    await updateDoc(doc(db,"courts",court.id), { isActive: next });
+    await logCourtActivity(
+      "Court Status Changed",
+      `“${court.name}” ${next ? "activated" : "deactivated"}`
+    );
   }
 
   const filtered = courts.filter(c =>
@@ -104,6 +134,15 @@ export default function CourtManager() {
               </div>
             )}
             <div className="cm-actions">
+              {court.isActive && (
+                <Link
+                  className="ad-btn ad-btn-sm"
+                  style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                  to={`/admin/new-booking?court=${encodeURIComponent(court.id)}`}
+                >
+                  📅 Book
+                </Link>
+              )}
               <button className="ad-btn ad-btn-sm ad-btn-outline" onClick={()=>openEdit(court)}>✏️ Edit</button>
               <button className="ad-btn ad-btn-sm ad-btn-outline" onClick={()=>toggleActive(court)}>
                 {court.isActive ? "🔒 Deactivate" : "✅ Activate"}

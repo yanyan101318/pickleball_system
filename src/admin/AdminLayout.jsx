@@ -1,22 +1,60 @@
 // src/admin/AdminLayout.jsx
-import { useState } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useState, useEffect, useRef } from "react";
+import { NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 
-const NAV_ITEMS = [
+const NAV_LINKS = [
   { to: "/admin/dashboard",   label: "Dashboard"    },
+  { to: "/admin/schedule",    label: "Schedule"     },
   { to: "/admin/courts",      label: "Courts"        },
+];
+
+const BOOKING_SUBLINKS = [
   { to: "/admin/bookings",    label: "Bookings"      },
-  { to: "/admin/payments",    label: "Payments"      },
-  { to: "/admin/tournament",  label: "Tournament"    },
+  { to: "/admin/new-booking", label: "New booking"  },
+];
+
+const TOURNAMENT_SUBLINKS = [
+  { to: "/admin/tournament",   label: "Tournament bracket" },
+  { to: "/admin/paddle-stack", label: "Paddle stacking"   },
+];
+
+const NAV_LINKS_AFTER_TOURNAMENT = [
   { to: "/admin/announcements", label: "Announcements" },
   { to: "/admin/analytics",   label: "Analytics"     },
+  { to: "/admin/inventory",   label: "Inventory"     },
 ];
 
 export default function AdminLayout() {
   const { profile, logout } = useAuth();
   const [showLogout, setShowLogout] = useState(false);
+  const [tournamentOpen, setTournamentOpen] = useState(false);
+  const [bookingOpen, setBookingOpen] = useState(false);
+  const tournamentRef = useRef(null);
+  const bookingRef = useRef(null);
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const tournamentNavActive = TOURNAMENT_SUBLINKS.some((s) => location.pathname === s.to);
+  const bookingNavActive = BOOKING_SUBLINKS.some((s) => location.pathname === s.to);
+
+  useEffect(() => {
+    setTournamentOpen(false);
+    setBookingOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (tournamentRef.current && !tournamentRef.current.contains(e.target)) {
+        setTournamentOpen(false);
+      }
+      if (bookingRef.current && !bookingRef.current.contains(e.target)) {
+        setBookingOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   async function handleLogout() {
     await logout();
@@ -46,7 +84,116 @@ export default function AdminLayout() {
               </div>
             </div>
             <div className="hidden lg:flex items-center gap-6 ml-6">
-              {NAV_ITEMS.map(item => (
+              {NAV_LINKS.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={({ isActive }) =>
+                    `text-xs font-medium transition-colors ${
+                      isActive
+                        ? "nav-link-active text-cyan-400"
+                        : "nav-link text-slate-400 hover:text-cyan-400"
+                    }`
+                  }
+                >
+                  {item.label}
+                </NavLink>
+              ))}
+              <div className="relative" ref={bookingRef}>
+                <button
+                  type="button"
+                  className={`text-xs font-medium transition-colors flex items-center gap-0.5 ${
+                    bookingNavActive || bookingOpen
+                      ? "nav-link-active text-cyan-400"
+                      : "nav-link text-slate-400 hover:text-cyan-400"
+                  }`}
+                  onClick={() => {
+                    setTournamentOpen(false);
+                    setBookingOpen((o) => !o);
+                  }}
+                  aria-expanded={bookingOpen}
+                  aria-haspopup="true"
+                >
+                  Booking
+                  <span className="material-symbols-outlined text-[18px] leading-none">
+                    {bookingOpen ? "expand_less" : "expand_more"}
+                  </span>
+                </button>
+                {bookingOpen && (
+                  <div className="absolute left-0 top-full mt-1 py-1 min-w-[200px] rounded-lg border border-slate-700 bg-[#151e2d] shadow-xl z-[60]">
+                    {BOOKING_SUBLINKS.map((s) => (
+                      <NavLink
+                        key={s.to}
+                        to={s.to}
+                        className={({ isActive }) =>
+                          `block px-4 py-2.5 text-xs font-medium transition-colors ${
+                            isActive
+                              ? "bg-slate-800/80 text-cyan-400"
+                              : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                          }`
+                        }
+                        onClick={() => setBookingOpen(false)}
+                      >
+                        {s.label}
+                      </NavLink>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <NavLink
+                to="/admin/payments"
+                className={({ isActive }) =>
+                  `text-xs font-medium transition-colors ${
+                    isActive
+                      ? "nav-link-active text-cyan-400"
+                      : "nav-link text-slate-400 hover:text-cyan-400"
+                  }`
+                }
+              >
+                Payments
+              </NavLink>
+              <div className="relative" ref={tournamentRef}>
+                <button
+                  type="button"
+                  className={`text-xs font-medium transition-colors flex items-center gap-0.5 ${
+                    tournamentNavActive || tournamentOpen
+                      ? "nav-link-active text-cyan-400"
+                      : "nav-link text-slate-400 hover:text-cyan-400"
+                  }`}
+                  onClick={() => {
+                    setBookingOpen(false);
+                    setTournamentOpen((o) => !o);
+                  }}
+                  aria-expanded={tournamentOpen}
+                  aria-haspopup="true"
+                >
+                  Tournament
+                  <span className="material-symbols-outlined text-[18px] leading-none">
+                    {tournamentOpen ? "expand_less" : "expand_more"}
+                  </span>
+                </button>
+                {tournamentOpen && (
+                  <div className="absolute left-0 top-full mt-1 py-1 min-w-[220px] rounded-lg border border-slate-700 bg-[#151e2d] shadow-xl z-[60]">
+                    {TOURNAMENT_SUBLINKS.map((s) => (
+                      <NavLink
+                        key={s.to}
+                        to={s.to}
+                        className={({ isActive }) =>
+                          `block px-4 py-2.5 text-xs font-medium transition-colors ${
+                            isActive
+                              ? "bg-slate-800/80 text-cyan-400"
+                              : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                          }`
+                        }
+                        onClick={() => setTournamentOpen(false)}
+                      >
+                        {s.label}
+                      </NavLink>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {NAV_LINKS_AFTER_TOURNAMENT.map((item) => (
                 <NavLink
                   key={item.to}
                   to={item.to}

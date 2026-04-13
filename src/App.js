@@ -16,6 +16,10 @@ import PaymentReview        from "./admin/PaymentReview";
 import Analytics            from "./admin/Analytics";
 import AnnouncementManager  from "./admin/AnnouncementManager";
 import AdminTournament      from "./admin/AdminTournament";
+import AdminSchedule        from "./admin/AdminSchedule";
+import Book                 from "./components/Book";
+import InventoryPage        from "./admin/InventoryPage";
+import PaddleStackingPage   from "./admin/PaddleStackingPage";
 
 // Tournament public pages (scorer / viewer)
 import ScorerPage from "./pages/ScorerPage";
@@ -24,11 +28,18 @@ import ViewerPage from "./pages/ViewerPage";
 import "./App.css";
 import "./admin/admin.css";
 import "./auth/auth.css";
+import { Toaster } from "react-hot-toast";
 
 export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <Toaster
+          position="top-right"
+          toastOptions={{
+            style: { background: "#151e2d", color: "#e2e8f0", border: "1px solid #334155" },
+          }}
+        />
         <Routes>
 
           {/* ── PUBLIC ── */}
@@ -47,11 +58,15 @@ export default function App() {
           }>
             <Route index                element={<Navigate to="/admin/dashboard" replace/>}/>
             <Route path="dashboard"     element={<AdminDashboard/>}/>
+            <Route path="schedule"      element={<AdminSchedule/>}/>
+            <Route path="new-booking"   element={<Book/>}/>
             <Route path="courts"        element={<CourtManager/>}/>
             <Route path="bookings"      element={<BookingManager/>}/>
             <Route path="payments"      element={<PaymentReview/>}/>
             <Route path="tournament"    element={<AdminTournament/>}/>
+            <Route path="paddle-stack"  element={<PaddleStackingPage/>}/>
             <Route path="analytics"     element={<Analytics/>}/>
+            <Route path="inventory"     element={<InventoryPage/>}/>
             <Route path="announcements" element={<AnnouncementManager/>}/>
           </Route>
 

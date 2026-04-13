@@ -1,8 +1,19 @@
 // src/admin/AdminDashboard.jsx
-import { useState, useEffect } from "react";
-import { collection, query, where, getDocs, orderBy, limit, Timestamp } from "firebase/firestore";
+import { useState, useEffect, useMemo } from "react";
+import { Link } from "react-router-dom";
+import {
+  collection,
+  query,
+  where,
+  getDocs,
+  orderBy,
+  limit,
+  Timestamp,
+  onSnapshot,
+} from "firebase/firestore";
 import { db } from "../firebase";
 import { useAuth } from "../auth/AuthContext";
+import ActivityFeedTimeline, { buildActivityEvents } from "./ActivityFeedTimeline";
 
 function StatCard({ icon, label, value, sub, color, status }) {
   const getStatusColor = (status) => {
@@ -50,9 +61,17 @@ export default function AdminDashboard() {
     totalPlayers: 0,
     activeCourts: 12
   });
-  const [recentBookings, setRecentBookings] = useState([]);
   const [recentPayments, setRecentPayments] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  const [feedBookings, setFeedBookings] = useState([]);
+  const [feedPayments, setFeedPayments] = useState([]);
+  const [feedLogs, setFeedLogs] = useState([]);
+
+  const activityEvents = useMemo(
+    () => buildActivityEvents({ bookings: feedBookings, payments: feedPayments, logs: feedLogs }).slice(0, 50),
+    [feedBookings, feedPayments, feedLogs]
+  );
 
   useEffect(() => {
     async function fetchData() {
@@ -61,40 +80,31 @@ export default function AdminDashboard() {
         today.setHours(0,0,0,0);
         const todayTs = Timestamp.fromDate(today);
 
-        // Bookings today
         const bSnap = await getDocs(query(
           collection(db,"bookings"),
           where("createdAt",">=",todayTs)
         ));
 
-        // Pending payments
         const pSnap = await getDocs(query(
           collection(db,"payments"),
           where("paymentStatus","==","Pending")
         ));
 
-        // Total players
         const uSnap = await getDocs(query(
           collection(db,"users"),
           where("role","==","customer")
         ));
 
+        const courtsSnap = await getDocs(collection(db, "courts"));
+        const activeCourts = courtsSnap.docs.filter((d) => d.data().isActive !== false).length;
+
         setStats({
           bookingsToday: bSnap.size,
           pendingPayments: pSnap.size,
           totalPlayers: uSnap.size,
-          activeCourts: 12, // Static for now
+          activeCourts: activeCourts || courtsSnap.size,
         });
 
-        // Recent bookings (last 5)
-        const rbSnap = await getDocs(query(
-          collection(db,"bookings"),
-          orderBy("createdAt","desc"),
-          limit(5)
-        ));
-        setRecentBookings(rbSnap.docs.map(d=>({id:d.id,...d.data()})));
-
-        // Recent payments (last 5)
         const rpSnap = await getDocs(query(
           collection(db,"payments"),
           orderBy("createdAt","desc"),
@@ -108,6 +118,34 @@ export default function AdminDashboard() {
       setLoading(false);
     }
     fetchData();
+  }, []);
+
+  useEffect(() => {
+    const qB = query(collection(db, "bookings"), orderBy("createdAt", "desc"), limit(40));
+    const qP = query(collection(db, "payments"), orderBy("createdAt", "desc"), limit(40));
+    const qL = query(collection(db, "activityLogs"), orderBy("createdAt", "desc"), limit(40));
+
+    const unsubB = onSnapshot(
+      qB,
+      (snap) => setFeedBookings(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+      (err) => console.error("Activity feed (bookings):", err)
+    );
+    const unsubP = onSnapshot(
+      qP,
+      (snap) => setFeedPayments(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+      (err) => console.error("Activity feed (payments):", err)
+    );
+    const unsubL = onSnapshot(
+      qL,
+      (snap) => setFeedLogs(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+      (err) => console.error("Activity feed (logs):", err)
+    );
+
+    return () => {
+      unsubB();
+      unsubP();
+      unsubL();
+    };
   }, []);
 
   const hour = new Date().getHours();
@@ -133,14 +171,20 @@ export default function AdminDashboard() {
           <p className="text-sm text-slate-400">Here's a comprehensive look at your facility's heartbeat today.</p>
         </div>
         <div className="flex items-center gap-2">
-          <button className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-semibold rounded-lg transition-all flex items-center gap-1.5 text-sm">
+          <Link
+            to="/admin/schedule"
+            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-semibold rounded-lg transition-all flex items-center gap-1.5 text-sm"
+          >
             <span className="material-symbols-outlined text-base">calendar_today</span>
             Schedule
-          </button>
-          <button className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded-lg transition-all shadow-lg cyan-glow flex items-center gap-1.5 text-sm">
+          </Link>
+          <Link
+            to="/admin/new-booking"
+            className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded-lg transition-all shadow-lg cyan-glow flex items-center gap-1.5 text-sm"
+          >
             <span className="material-symbols-outlined text-base">add_circle</span>
             New Booking
-          </button>
+          </Link>
         </div>
       </div>
 
@@ -174,7 +218,7 @@ export default function AdminDashboard() {
           icon="sports_tennis"
           label="Active Courts"
           value={stats.activeCourts}
-          sub="12/12 Available"
+          sub="From Court Management"
           color="emerald"
           status="live-status"
         />
@@ -184,26 +228,31 @@ export default function AdminDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* ACTIVITY FEED */}
         <div className="lg:col-span-2 space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <h2 className="text-lg font-black text-white tracking-tight flex items-center gap-2">
-              Today's Activity Feed
+              Today&apos;s Activity Feed
               <span className="px-1.5 py-0.5 bg-slate-800 text-[9px] font-bold rounded text-slate-400 uppercase">Live</span>
             </h2>
-            <button className="text-xs font-bold text-cyan-400 hover:underline">View Historical Data</button>
+            <Link to="/admin/schedule" className="text-xs font-bold text-cyan-400 hover:underline shrink-0">
+              View schedule
+            </Link>
           </div>
           <div className="bg-[#151e2d] border border-slate-800 rounded-2xl overflow-hidden">
-            <div className="max-h-[400px] overflow-y-auto custom-scrollbar p-4 space-y-3">
-              <div className="flex flex-col items-center justify-center py-16 text-center border-2 border-dashed border-slate-800/50 rounded-xl bg-slate-900/20">
-                <div className="w-12 h-12 bg-slate-800/50 rounded-full flex items-center justify-center mb-3">
-                  <span className="material-symbols-outlined text-slate-600 text-2xl">history_toggle_off</span>
+            <div className="p-4 sm:p-5 border-b border-slate-800/80">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-500/20">
+                  <span className="material-symbols-outlined text-sky-400 text-xl">schedule</span>
                 </div>
-                <h3 className="text-sm font-bold text-white mb-1">No activities recorded yet</h3>
-                <p className="text-slate-500 text-xs max-w-xs mb-4">When bookings, payments, or court changes occur, they will appear here in chronological order.</p>
-                <div className="flex gap-3">
-                  <button className="px-3 py-1.5 text-xs font-semibold text-slate-300 hover:text-white transition-colors">Refresh Feed</button>
-                  <button className="px-4 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-semibold hover:bg-slate-700 transition-colors">Simulation Mode</button>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-black text-white tracking-tight">Activity History</h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                    All bookings, payments, and court changes appear here in chronological order (newest first).
+                  </p>
                 </div>
               </div>
+            </div>
+            <div className="max-h-[420px] overflow-y-auto custom-scrollbar p-4 sm:p-5">
+              <ActivityFeedTimeline events={activityEvents} />
             </div>
           </div>
         </div>
@@ -212,7 +261,7 @@ export default function AdminDashboard() {
           <div className="bg-[#151e2d] border border-slate-800 rounded-2xl p-4 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-white tracking-tight uppercase">Recent Payments</h3>
-              <a className="text-[10px] font-bold text-cyan-400" href="/admin/payments">View All</a>
+              <Link className="text-[10px] font-bold text-cyan-400" to="/admin/payments">View All</Link>
             </div>
             {recentPayments.length === 0 ? (
               <div className="text-center py-6 border border-dashed border-slate-800 rounded-lg">
