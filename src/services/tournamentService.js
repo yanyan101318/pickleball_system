@@ -1,6 +1,6 @@
 // src/services/tournamentService.js
 import {
-  doc, setDoc, getDoc, updateDoc, onSnapshot,
+  doc, getDoc, updateDoc, onSnapshot,
   collection, writeBatch,
 } from "firebase/firestore";
 import { db } from "../firebase";

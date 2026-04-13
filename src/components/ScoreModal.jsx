@@ -1,6 +1,6 @@
 // src/components/ScoreModal.jsx
 import { useState, useEffect } from "react";
-import { setsNeeded, setsTotal, isGameWon, getGameWinner, recordPoint, recordFault } from "../utils/bracketGenerator";
+import { setsNeeded, setsTotal, isGameWon, getGameWinner } from "../utils/bracketGenerator";
 
 function getStoredScore(matchId) {
   try {
@@ -130,7 +130,20 @@ export default function ScoreModal({ match, onSetWin, onUndo, onFault, onClose }
             <span className="modal-format-tag">{formatLabel()}</span>
             {hasUnsaved && <span className="score-saved-badge">● Score saved locally</span>}
           </div>
-          <button className="modal-close" onClick={onClose}>✕</button>
+          <div className="modal-hdr-actions" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            {onUndo && !winner && (localA > 0 || localB > 0) && (
+              <button
+                type="button"
+                className="modal-close"
+                style={{ fontSize: "0.75rem", padding: "6px 10px", width: "auto" }}
+                onClick={handleUndo}
+                title="Clear local score and notify bracket"
+              >
+                Reset score
+              </button>
+            )}
+            <button className="modal-close" onClick={onClose}>✕</button>
+          </div>
         </div>
 
         {/* Game Status and Serving Info */}

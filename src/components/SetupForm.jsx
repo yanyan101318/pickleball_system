@@ -1,5 +1,5 @@
 // src/components/SetupForm.jsx
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 
 const FORMAT_OPTIONS = [
   { value: "bo1", label: "Single Game", sub: "BO1", desc: "First win takes it" },

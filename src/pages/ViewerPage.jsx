@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { subscribeToMatches, subscribeToTournamentInfo } from "../services/tournamentService";
-import { setsNeeded, setsTotal } from "../utils/bracketGenerator";
+import { setsNeeded } from "../utils/bracketGenerator";
 
 const ROUND_LABELS = ["Round 1","Quarterfinals","Semifinals","Final","Grand Final"];
 
@@ -57,12 +57,6 @@ export default function ViewerPage() {
   const [info, setInfo]         = useState(null);
   const [loading, setLoading]   = useState(true);
   const [flashId, setFlashId]   = useState(null);
-  const [tick, setTick]         = useState(0);
-
-  useEffect(() => {
-    const t = setInterval(()=>setTick(p=>p+1), 1000);
-    return ()=>clearInterval(t);
-  }, []);
 
   useEffect(() => {
     const unsubInfo    = subscribeToTournamentInfo(tournamentId, setInfo);
@@ -223,7 +217,6 @@ export default function ViewerPage() {
 function ViewerCard2({ match, format, sizeClass, isFlashing }) {
   const { teamA, teamB, sets=[], winner, matchId } = match;
   const needed    = setsNeeded(format);
-  const total     = setsTotal(format);
   const winsA     = sets.filter(s=>s.winner==="A").length;
   const winsB     = sets.filter(s=>s.winner==="B").length;
   const isPending = !teamA || !teamB;

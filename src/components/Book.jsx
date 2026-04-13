@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useSearchParams, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { db } from "../firebase";
@@ -127,21 +127,7 @@ export default function Book() {
     });
   }, [activeCourts, courtParam]);
 
-  useEffect(() => {
-    if (!user) {
-      if (!adminMode) navigate("/login");
-      return;
-    }
-    if (!form.courtId) return;
-    loadBookedSlots();
-  }, [form.courtId, form.date, user, adminMode, navigate]);
-
-  useEffect(() => {
-    if (adminMode) return;
-    if (profile?.name) setForm((f) => ({ ...f, playerName: profile.name }));
-  }, [profile, adminMode]);
-
-  const loadBookedSlots = async () => {
+  const loadBookedSlots = useCallback(async () => {
     if (!form.courtId) return;
     try {
       const q = query(
@@ -153,8 +139,24 @@ export default function Book() {
       const snap = await getDocs(q);
       const slots = snap.docs.map((d) => d.data().timeSlot);
       setBookedSlots(slots);
-    } catch { setBookedSlots([]); }
-  };
+    } catch {
+      setBookedSlots([]);
+    }
+  }, [form.courtId, form.date]);
+
+  useEffect(() => {
+    if (!user) {
+      if (!adminMode) navigate("/login");
+      return;
+    }
+    if (!form.courtId) return;
+    loadBookedSlots();
+  }, [form.courtId, form.date, user, adminMode, navigate, loadBookedSlots]);
+
+  useEffect(() => {
+    if (adminMode) return;
+    if (profile?.name) setForm((f) => ({ ...f, playerName: profile.name }));
+  }, [profile, adminMode]);
 
   const equipmentItems = EQUIPMENT.filter((e) => form.equipment.includes(e.id));
   const equipmentTotal = equipmentItems.reduce((s, e) => s + e.price, 0);

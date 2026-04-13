@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { subscribeToMatch, updateMatch, updateNextMatch, setChampion, getTournamentInfo } from "../services/tournamentService";
-import { recordSetWin, undoLastSet, setsNeeded, setsTotal, recordPoint, recordFault, isGameWon, getGameWinner } from "../utils/bracketGenerator";
+import { recordSetWin, undoLastSet, setsNeeded, setsTotal, recordPoint, recordFault } from "../utils/bracketGenerator";
 import RulesReference from "../components/RulesReference";
 
 // localStorage helpers
@@ -66,9 +66,6 @@ export default function ScorerPage() {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 2500);
   }
-
-  function handleAddA(delta) { setLocalA(p => Math.max(0, p + delta)); triggerFlash("A", delta > 0 ? "plus" : "minus"); }
-  function handleAddB(delta) { setLocalB(p => Math.max(0, p + delta)); triggerFlash("B", delta > 0 ? "plus" : "minus"); }
 
   function handleUndoPointA() {
     if (localA > 0) {
@@ -152,35 +149,6 @@ export default function ScorerPage() {
     } finally {
       setSaving(false);
     }
-  }
-
-  async function handleWinSet(team) {
-    if (!match || match.winner || saving) return;
-    setSaving(true);
-    try {
-      const m = { ...match, sets: [...match.sets] };
-      recordSetWin(m, team, { [m.matchId]: m }, localA, localB);
-      await updateMatch(tournamentId, m);
-      if (m.winner && m.nextMatchId) {
-        const { getDoc, doc } = await import("firebase/firestore");
-        const { db } = await import("../firebase");
-        const snap = await getDoc(doc(db, "tournaments", tournamentId, "matches", m.nextMatchId));
-        if (snap.exists()) {
-          const nm = snap.data();
-          if (nm.fromMatchA === m.matchId) nm.teamA = m.winner;
-          else nm.teamB = m.winner;
-          await updateNextMatch(tournamentId, nm);
-        }
-      }
-      if (m.winner && !m.nextMatchId) await setChampion(tournamentId, m.winner);
-      clearScore(matchId);
-      setLocalA(0); setLocalB(0);
-      showToast(m.winner ? `🏆 ${m.winner} wins the match!` : "Set recorded ✓");
-    } catch (err) {
-      console.error(err);
-      showToast("Failed to save. Try again.", "error");
-    }
-    setSaving(false);
   }
 
   async function handleUndo() {

@@ -232,7 +232,6 @@ function generateRoundRobin(teams, format) {
   }
 
   // Distribute matches into rounds (trying to minimize rounds)
-  const teamsUsedPerRound = new Set();
   let roundNum = 1;
 
   while (matches.length > 0) {
@@ -297,7 +296,6 @@ function generateDoubleElimination(teams, format) {
   const padded = [...teams];
   while (padded.length < size) padded.push("BYE");
 
-  const rounds = [];
   const matchMap = {};
   let matchId = 1;
 
@@ -375,8 +373,6 @@ function generateDoubleElimination(teams, format) {
     currentRound = nextRound;
     roundNum++;
   }
-
-  const winnersFinal = currentRound[0];
 
   // Loser's bracket (complex - simplified single-elimination path for now)
   // In a full double-elim, losers bracket is intricate; this provides basic structure
