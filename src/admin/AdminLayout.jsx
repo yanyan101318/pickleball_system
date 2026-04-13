@@ -256,9 +256,24 @@ export default function AdminLayout() {
       <footer className="max-w-[1600px] mx-auto p-6 mt-12 border-t border-slate-800 flex flex-col md:flex-row justify-between items-center gap-4 text-slate-500 text-xs font-medium">
         <div>© 2026 PicklePro Volt Management Systems. All rights reserved.</div>
         <div className="flex items-center gap-6">
-          <a className="hover:text-white transition-colors" href="#">Privacy Policy</a>
-          <a className="hover:text-white transition-colors" href="#">Terms of Service</a>
-          <a className="hover:text-white transition-colors" href="#">Support Center</a>
+          <button
+            type="button"
+            className="hover:text-white transition-colors bg-transparent border-0 p-0 cursor-pointer font-inherit text-inherit"
+          >
+            Privacy Policy
+          </button>
+          <button
+            type="button"
+            className="hover:text-white transition-colors bg-transparent border-0 p-0 cursor-pointer font-inherit text-inherit"
+          >
+            Terms of Service
+          </button>
+          <button
+            type="button"
+            className="hover:text-white transition-colors bg-transparent border-0 p-0 cursor-pointer font-inherit text-inherit"
+          >
+            Support Center
+          </button>
         </div>
       </footer>
     </div>

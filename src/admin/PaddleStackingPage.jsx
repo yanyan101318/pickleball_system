@@ -1,5 +1,6 @@
 // src/admin/PaddleStackingPage.jsx — admin-only paddle queue & court rotation
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { Link } from "react-router-dom";
 import {
   doc,
   getDoc,
@@ -32,10 +33,21 @@ export default function PaddleStackingPage() {
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [history, setHistory] = useState([]);
+  const [facilityCourts, setFacilityCourts] = useState([]);
   const [newPlayer, setNewPlayer] = useState("");
   const [queueSearch, setQueueSearch] = useState("");
   const [assignCourtId, setAssignCourtId] = useState("");
   const [assignMode, setAssignMode] = useState("doubles");
+  const [pickFacilityCourtId, setPickFacilityCourtId] = useState("");
+  const [customCourtName, setCustomCourtName] = useState("");
+
+  useEffect(() => {
+    const cq = query(collection(db, "courts"), orderBy("createdAt", "desc"));
+    const unsubC = onSnapshot(cq, (snap) => {
+      setFacilityCourts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    });
+    return () => unsubC();
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -77,6 +89,16 @@ export default function PaddleStackingPage() {
 
   const queue = useMemo(() => state?.queue || [], [state]);
   const courts = useMemo(() => state?.courts || [], [state]);
+
+  const facilityCourtsAvailable = useMemo(
+    () =>
+      facilityCourts.filter(
+        (fc) =>
+          fc.isActive !== false &&
+          !courts.some((c) => c.facilityCourtId && c.facilityCourtId === fc.id)
+      ),
+    [facilityCourts, courts]
+  );
 
   const filteredQueue = useMemo(() => {
     const q = queueSearch.trim().toLowerCase();
@@ -127,15 +149,27 @@ export default function PaddleStackingPage() {
     await persistState({ queue: next });
   }
 
-  async function addCourt() {
-    const name = window.prompt("Court name:", `Court ${courts.length + 1}`);
-    if (!name?.trim()) return;
+  async function addCourtFromFacility() {
+    const fc = facilityCourts.find((x) => x.id === pickFacilityCourtId);
+    if (!fc) {
+      toast.error("Choose a facility court from the list");
+      return;
+    }
+    if (fc.isActive === false) {
+      toast.error("That facility court is inactive — activate it under Court management first");
+      return;
+    }
+    if (courts.some((c) => c.facilityCourtId === fc.id)) {
+      toast.error("That court is already on the board");
+      return;
+    }
     await persistState({
       courts: [
         ...courts,
         {
           id: newId(),
-          name: name.trim(),
+          name: (fc.name || "Court").trim(),
+          facilityCourtId: fc.id,
           status: "available",
           gameType: null,
           playerSlots: [],
@@ -143,6 +177,32 @@ export default function PaddleStackingPage() {
         },
       ],
     });
+    setPickFacilityCourtId("");
+    toast.success(`Added “${fc.name}” (linked to facility)`);
+  }
+
+  async function addCourtCustom() {
+    const name = customCourtName.trim();
+    if (!name) {
+      toast.error("Enter a custom court name");
+      return;
+    }
+    await persistState({
+      courts: [
+        ...courts,
+        {
+          id: newId(),
+          name,
+          facilityCourtId: null,
+          status: "available",
+          gameType: null,
+          playerSlots: [],
+          startedAt: null,
+        },
+      ],
+    });
+    setCustomCourtName("");
+    toast.success(`Added “${name}” (custom label — not linked)`);
   }
 
   async function removeCourt(courtId) {
@@ -281,6 +341,15 @@ export default function PaddleStackingPage() {
           <p className="ad-page-sub">
             FIFO queue, court assignment (singles / doubles), and match log — admin only, no player portal.
           </p>
+          <p className="text-[12px] text-[var(--ad-muted)] mt-2 max-w-2xl">
+            <Link
+              to="/admin/courts"
+              className="text-[var(--ad-pickle)] font-semibold hover:underline"
+            >
+              Court management
+            </Link>{" "}
+            lists your real facility courts — link them below so staff pick the same names players see when booking.
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" className="ad-btn ad-btn-outline ad-btn-sm" onClick={resetSession}>
@@ -379,12 +448,74 @@ export default function PaddleStackingPage() {
         {/* Courts + assign */}
         <div className="xl:col-span-2 space-y-4">
           <div className="ad-card p-4">
-            <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
-              <h3 className="text-sm font-black text-white uppercase tracking-wide">Game assignment</h3>
-              <button type="button" className="ad-btn ad-btn-outline ad-btn-sm" onClick={addCourt}>
-                + Add court
-              </button>
+            <h3 className="text-sm font-black text-white uppercase tracking-wide mb-3">Game assignment</h3>
+
+            <div className="rounded-lg border border-[var(--ad-border)] bg-[#0d0f14]/80 p-3 mb-4 space-y-3">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--ad-muted)]">
+                Courts on this board
+              </div>
+              {facilityCourts.length === 0 ? (
+                <p className="text-[11px] text-amber-400/95 leading-relaxed">
+                  No courts in your facility yet.{" "}
+                  <Link to="/admin/courts" className="underline font-semibold text-[var(--ad-pickle)]">
+                    Add courts in Court management
+                  </Link>{" "}
+                  first, then choose them here so labels match bookings.
+                </p>
+              ) : facilityCourtsAvailable.length === 0 ? (
+                <p className="text-[11px] text-[var(--ad-muted)]">
+                  Every active facility court is already on this board, or add a{" "}
+                  <strong className="text-[var(--ad-text)]">custom</strong> label for a temporary bay.
+                </p>
+              ) : null}
+              <div className="flex flex-wrap gap-2 items-end">
+                <div className="af-group flex-1 min-w-[200px]">
+                  <label className="af-label">Add from facility list</label>
+                  <select
+                    className="af-input"
+                    value={pickFacilityCourtId}
+                    onChange={(e) => setPickFacilityCourtId(e.target.value)}
+                  >
+                    <option value="">Select a court…</option>
+                    {facilityCourtsAvailable.map((fc) => (
+                      <option key={fc.id} value={fc.id}>
+                        {fc.name}
+                        {fc.pricePerHour != null && !Number.isNaN(Number(fc.pricePerHour))
+                          ? ` · ₱${Number(fc.pricePerHour)}/hr`
+                          : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  className="ad-btn ad-btn-primary ad-btn-sm shrink-0"
+                  onClick={addCourtFromFacility}
+                  disabled={!pickFacilityCourtId}
+                >
+                  Add linked court
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2 items-end pt-2 border-t border-[var(--ad-border)]/70">
+                <div className="af-group flex-1 min-w-[200px]">
+                  <label className="af-label">Or custom label</label>
+                  <input
+                    className="af-input"
+                    value={customCourtName}
+                    onChange={(e) => setCustomCourtName(e.target.value)}
+                    placeholder="e.g. Court A, spare bay…"
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="ad-btn ad-btn-outline ad-btn-sm shrink-0"
+                  onClick={addCourtCustom}
+                >
+                  Add custom
+                </button>
+              </div>
             </div>
+
             <div className="flex flex-wrap gap-3 mb-4">
               <div className="af-group min-w-[140px]">
                 <label className="af-label">Format</label>
@@ -407,7 +538,9 @@ export default function PaddleStackingPage() {
                   <option value="">Select…</option>
                   {courts.map((c) => (
                     <option key={c.id} value={c.id} disabled={c.status !== "available"}>
-                      {c.name} {c.status === "ongoing" ? "(busy)" : ""}
+                      {c.name}
+                      {c.facilityCourtId ? " · facility" : ""}
+                      {c.status === "ongoing" ? " (busy)" : ""}
                     </option>
                   ))}
                 </select>
@@ -436,8 +569,24 @@ export default function PaddleStackingPage() {
                   <div className="flex justify-between items-start gap-2 mb-2">
                     <div>
                       <div className="font-bold text-[var(--ad-text)]">{c.name}</div>
+                      {c.facilityCourtId ? (
+                        <Link
+                          to="/admin/courts"
+                          className="inline-flex items-center gap-0.5 text-[10px] text-cyan-400/95 hover:underline font-medium mt-0.5"
+                          title="Opens Court management — same court as bookings"
+                        >
+                          <span className="material-symbols-outlined text-[13px]" aria-hidden>
+                            link
+                          </span>
+                          Linked to facility list
+                        </Link>
+                      ) : (
+                        <span className="text-[10px] text-[var(--ad-muted)] mt-0.5 block">
+                          Custom label (not linked)
+                        </span>
+                      )}
                       <span
-                        className={`text-[10px] uppercase font-bold ${
+                        className={`text-[10px] uppercase font-bold block mt-1 ${
                           c.status === "ongoing" ? "text-emerald-400" : "text-slate-500"
                         }`}
                       >
