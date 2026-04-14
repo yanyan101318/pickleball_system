@@ -143,12 +143,12 @@ export default function CourtManager() {
                   📅 Book
                 </Link>
               )}
-              <button className="ad-btn ad-btn-sm ad-btn-outline" onClick={()=>openEdit(court)}>✏️ Edit</button>
+              <button className="ad-btn ad-btn-sm ad-btn-outline" onClick={()=>openEdit(court)}> Edit</button>
               <button className="ad-btn ad-btn-sm ad-btn-outline" onClick={()=>toggleActive(court)}>
-                {court.isActive ? "🔒 Deactivate" : "✅ Activate"}
+                {court.isActive ? " Deactivate" : " Activate"}
               </button>
               <button className="ad-btn ad-btn-sm ad-btn-danger" onClick={()=>handleDelete(court.id)} disabled={deleting===court.id}>
-                {deleting===court.id ? "..." : "🗑️ Delete"}
+                {deleting===court.id ? "..." : " Delete"}
               </button>
             </div>
           </div>

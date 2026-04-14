@@ -48,11 +48,11 @@ function AnnouncementCard({ announcement, onEdit, onToggle, onDelete }) {
           </span>
         </div>
         <div className="an-card-actions">
-          <button className="an-card-btn an-card-btn-edit" onClick={()=>onEdit(announcement)}>✏️ Edit</button>
+          <button className="an-card-btn an-card-btn-edit" onClick={()=>onEdit(announcement)}> Edit</button>
           <button className="an-card-btn an-card-btn-toggle" onClick={()=>onToggle(announcement)}>
-            {announcement.isActive ? "🔒 Hide" : "✅ Show"}
+            {announcement.isActive ? " Hide" : " Show"}
           </button>
-          <button className="an-card-btn an-card-btn-delete" onClick={()=>onDelete(announcement.id)}>🗑️ Delete</button>
+          <button className="an-card-btn an-card-btn-delete" onClick={()=>onDelete(announcement.id)}> Delete</button>
         </div>
       </div>
     </div>

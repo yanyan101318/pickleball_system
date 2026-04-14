@@ -95,12 +95,12 @@ export default function PaymentReview() {
             <div className="pr-info">
               <div className="pr-name">{p.name ?? "Unknown"}</div>
               <div className="pr-meta">
-                <span>💳 {p.method ?? "—"}</span>
+                <span> {p.method ?? "—"}</span>
                 <span>₱{p.amount ?? "—"}</span>
               </div>
               <div className="pr-meta">
                 <span>📅 {p.date ?? "—"}</span>
-                <span>🏟️ {p.courtName ?? p.courtId ?? "—"}</span>
+                <span> {p.courtName ?? p.courtId ?? "—"}</span>
               </div>
               <span className={`ad-badge ad-badge-${statusColor[p.paymentStatus]??"pending"}`}>
                 {p.paymentStatus ?? "Pending"}
