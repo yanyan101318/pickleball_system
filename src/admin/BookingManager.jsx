@@ -1,7 +1,7 @@
 // src/admin/BookingManager.jsx
 import { useState, useEffect } from "react";
 import {
-  collection, query, orderBy, onSnapshot,
+  collection, query, orderBy, onSnapshot, where, getDocs, writeBatch,
   doc, updateDoc, Timestamp,
 } from "firebase/firestore";
 import { db } from "../firebase";
@@ -33,6 +33,45 @@ export default function BookingManager() {
         reviewedAt: Timestamp.now(),
       });
     } catch(err) { console.error(err); }
+    setActing(null);
+    setSelected(null);
+  }
+
+  async function removeBooking(id) {
+    const row = bookings.find((b) => b.id === id) ?? selected;
+    const label = row?.playerName || row?.courtName || "this booking";
+    let linkedSnap;
+    try {
+      linkedSnap = await getDocs(
+        query(collection(db, "payments"), where("bookingId", "==", id))
+      );
+    } catch (e) {
+      console.error(e);
+      window.alert("Could not load linked payment data. Try again.");
+      return;
+    }
+    const linkedPayments = linkedSnap.size;
+    const linkedNote =
+      linkedPayments > 0
+        ? `\n\nAlso removes ${linkedPayments} linked payment record(s) from the same submission.`
+        : "";
+    if (
+      !window.confirm(
+        `Delete this booking permanently?\n\n${label}${linkedNote}\n\nThis cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    setActing(id);
+    try {
+      const batch = writeBatch(db);
+      linkedSnap.forEach((d) => batch.delete(d.ref));
+      batch.delete(doc(db, "bookings", id));
+      await batch.commit();
+    } catch (err) {
+      console.error(err);
+      window.alert("Could not delete this booking. Check your connection and permissions.");
+    }
     setActing(null);
     setSelected(null);
   }
@@ -115,6 +154,15 @@ export default function BookingManager() {
                           ✕ Cancel
                         </button>
                       )}
+                      <button
+                        type="button"
+                        className="ad-btn ad-btn-sm ad-btn-outline"
+                        disabled={acting===b.id}
+                        onClick={() => removeBooking(b.id)}
+                        title="Remove this booking record"
+                      >
+                        Delete
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -142,13 +190,23 @@ export default function BookingManager() {
               </div>
               {selected.notes && <div className="ad-detail-row ad-detail-full"><span>Notes</span><strong>{selected.notes}</strong></div>}
             </div>
-            <div className="ad-modal-footer">
-              {selected.status!=="Approved" && (
-                <button className="ad-btn ad-btn-success" onClick={()=>setStatus(selected.id,"Approved")}>✓ Approve</button>
-              )}
-              {selected.status!=="Cancelled" && (
-                <button className="ad-btn ad-btn-danger" onClick={()=>setStatus(selected.id,"Cancelled")}>✕ Cancel</button>
-              )}
+            <div className="ad-modal-footer ad-modal-footer-between">
+              <button
+                type="button"
+                className="ad-btn ad-btn-outline"
+                disabled={acting===selected.id}
+                onClick={() => removeBooking(selected.id)}
+              >
+                Delete booking
+              </button>
+              <div className="ad-modal-footer-actions">
+                {selected.status!=="Approved" && (
+                  <button className="ad-btn ad-btn-success" disabled={acting===selected.id} onClick={()=>setStatus(selected.id,"Approved")}>✓ Approve</button>
+                )}
+                {selected.status!=="Cancelled" && (
+                  <button className="ad-btn ad-btn-danger" disabled={acting===selected.id} onClick={()=>setStatus(selected.id,"Cancelled")}>✕ Cancel</button>
+                )}
+              </div>
             </div>
           </div>
         </div>

@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import {
   collection, query, orderBy, onSnapshot,
-  doc, updateDoc, Timestamp,
+  doc, updateDoc, deleteDoc, Timestamp,
 } from "firebase/firestore";
 import { db } from "../firebase";
 
@@ -31,6 +31,27 @@ export default function PaymentReview() {
         reviewedAt: Timestamp.now(),
       });
     } catch(err) { console.error(err); }
+    setActing(null);
+    setPreview(null);
+  }
+
+  async function removePayment(id) {
+    const row = payments.find((p) => p.id === id) ?? preview;
+    const label = row?.name ? `${row.name} — ₱${row.amount ?? "—"}` : "this payment";
+    if (
+      !window.confirm(
+        `Delete this payment record permanently?\n\n${label}\n\nThis cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    setActing(id);
+    try {
+      await deleteDoc(doc(db, "payments", id));
+    } catch (err) {
+      console.error(err);
+      window.alert("Could not delete this payment. Check your connection and permissions.");
+    }
     setActing(null);
     setPreview(null);
   }
@@ -122,6 +143,15 @@ export default function PaymentReview() {
                   ✕ Reject
                 </button>
               )}
+              <button
+                type="button"
+                className="ad-btn ad-btn-outline ad-btn-sm"
+                disabled={acting===p.id}
+                onClick={() => removePayment(p.id)}
+                title="Remove this payment record"
+              >
+                Delete
+              </button>
             </div>
           </div>
         ))}
@@ -150,13 +180,23 @@ export default function PaymentReview() {
                 <div className="ad-detail-row"><span>Time</span><strong>{preview.timeSlot}</strong></div>
               </div>
             </div>
-            <div className="ad-modal-footer">
-              {preview.paymentStatus !== "Approved" && (
-                <button className="ad-btn ad-btn-success" onClick={()=>setStatus(preview.id,"Approved")}>✓ Approve Payment</button>
-              )}
-              {preview.paymentStatus !== "Rejected" && (
-                <button className="ad-btn ad-btn-danger" onClick={()=>setStatus(preview.id,"Rejected")}>✕ Reject Payment</button>
-              )}
+            <div className="ad-modal-footer ad-modal-footer-between">
+              <button
+                type="button"
+                className="ad-btn ad-btn-outline"
+                disabled={acting===preview.id}
+                onClick={() => removePayment(preview.id)}
+              >
+                Delete payment
+              </button>
+              <div className="ad-modal-footer-actions">
+                {preview.paymentStatus !== "Approved" && (
+                  <button className="ad-btn ad-btn-success" disabled={acting===preview.id} onClick={()=>setStatus(preview.id,"Approved")}>✓ Approve Payment</button>
+                )}
+                {preview.paymentStatus !== "Rejected" && (
+                  <button className="ad-btn ad-btn-danger" disabled={acting===preview.id} onClick={()=>setStatus(preview.id,"Rejected")}>✕ Reject Payment</button>
+                )}
+              </div>
             </div>
           </div>
         </div>

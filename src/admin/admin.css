@@ -253,7 +253,7 @@ body {
 .ad-btn-danger  { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
 .ad-btn-danger:hover:not(:disabled)  { background: #fecaca; }
 .ad-btn-sm { padding: 0.3rem 0.7rem; font-size: 0.78rem; border-radius: 6px; }
-.ad-action-btns { display: flex; gap: 5px; }
+.ad-action-btns { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
 
 /* ── FILTER TABS ─────────────────────────────── */
 .ad-filter-tabs { display: flex; gap: 4px; background: var(--ad-surface); border: 1px solid var(--ad-border); border-radius: 10px; padding: 4px; width: fit-content; }
@@ -304,13 +304,16 @@ body {
 .ad-modal-close { background: none; border: none; cursor: pointer; font-size: 1rem; color: var(--ad-muted); width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; transition: background 0.1s; }
 .ad-modal-close:hover { background: #f1f5f9; }
 .ad-modal-form { padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem; }
-.ad-modal-footer { display: flex; justify-content: flex-end; gap: 0.75rem; padding: 1rem 1.5rem; border-top: 1px solid var(--ad-border); }
+.ad-modal-footer { display: flex; justify-content: flex-end; gap: 0.75rem; padding: 1rem 1.5rem; border-top: 1px solid var(--ad-border); flex-wrap: wrap; align-items: center; }
+.ad-modal-footer-between { justify-content: space-between; }
+.ad-modal-footer-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: flex-end; }
 
 /* Detail grid */
 .ad-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; padding: 1.5rem; }
-.ad-detail-row { display: flex; flex-direction: column; gap: 3px; background: #f8fafc; padding: 0.6rem 0.85rem; border-radius: 8px; }
-.ad-detail-row span { font-size: 0.7rem; color: var(--ad-muted); text-transform: uppercase; letter-spacing: 0.5px; }
-.ad-detail-row strong { font-size: 0.9rem; color: var(--ad-text); }
+/* Light cards: use dark text — do NOT use --ad-text/--ad-muted (those are for dark surfaces). */
+.ad-detail-row { display: flex; flex-direction: column; gap: 3px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 0.6rem 0.85rem; border-radius: 8px; }
+.ad-detail-row span { font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+.ad-detail-row strong { font-size: 0.9rem; color: #0f172a; font-weight: 700; }
 .ad-detail-full { grid-column: 1 / -1; }
 
 /* ── COURT MANAGER ───────────────────────────── */
@@ -339,7 +342,7 @@ body {
 .pr-info { padding: 0.9rem 1rem; display: flex; flex-direction: column; gap: 5px; flex: 1; }
 .pr-name { font-size: 0.95rem; font-weight: 700; color: var(--ad-text); }
 .pr-meta { display: flex; gap: 0.75rem; font-size: 0.78rem; color: var(--ad-muted); flex-wrap: wrap; }
-.pr-actions { display: flex; gap: 6px; padding: 0.75rem 1rem; border-top: 1px solid var(--ad-border); }
+.pr-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 0.75rem 1rem; border-top: 1px solid var(--ad-border); align-items: center; }
 .pr-preview-modal { background: var(--ad-surface); border-radius: 16px; border: 1px solid var(--ad-border); width: 100%; max-width: 600px; box-shadow: 0 20px 60px rgba(0,0,0,0.15); animation: modalPop 0.2s ease; max-height: 90vh; overflow-y: auto; }
 .pr-preview-body { padding: 1.5rem; }
 .pr-preview-img { width: 100%; max-height: 360px; object-fit: contain; border-radius: 8px; border: 1px solid var(--ad-border); }
