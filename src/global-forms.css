@@ -13,9 +13,9 @@ html {
   -webkit-text-size-adjust: 100%;
 }
 
+/* Keep #root overflow visible so position:sticky works for admin top nav (clip breaks sticky in some browsers). */
 #root {
   min-height: 100vh;
-  overflow-x: clip;
 }
 
 /* ── Mobile & tablet ── */
