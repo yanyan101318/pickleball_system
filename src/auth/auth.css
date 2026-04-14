@@ -71,18 +71,36 @@
 
 .af-input {
   width: 100%;
-  padding: 0.7rem 0.9rem;
-  border: 1.5px solid #2a3348;
-  border-radius: 10px;
+  max-width: 100%;
+  padding: 9px 10px;
+  border: 1px solid #cccccc;
+  border-radius: 6px;
   font-size: 0.92rem;
   font-family: 'DM Sans', sans-serif;
-  color: #e2e8f0;
-  background: #0d0f14;
+  color: #0f172a;
+  background: #ffffff;
   outline: none;
   transition: border-color 0.15s, box-shadow 0.15s;
+  box-sizing: border-box;
 }
-.af-input:focus { border-color: #c8e63a; box-shadow: 0 0 0 3px rgba(200, 230, 58, 0.2); background: #161b25; }
-.af-textarea { resize: none; }
+.af-input::placeholder {
+  color: #64748b;
+  opacity: 1;
+}
+.af-input:focus {
+  border-color: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.2);
+  background: #ffffff;
+}
+.af-textarea {
+  resize: vertical;
+  min-height: 88px;
+}
+
+select.af-input {
+  min-height: 42px;
+  cursor: pointer;
+}
 
 .af-input-wrap { position: relative; }
 .af-input-wrap .af-input { padding-right: 2.5rem; }
