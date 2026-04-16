@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import SetupForm from "../components/SetupForm";
 import BracketView from "../components/BracketView";
-import { generateBracket, recordSetWin, undoLastSet, recordFault } from "../utils/bracketGenerator";
+import { generateBracket, recordSetWin, undoLastSet } from "../utils/bracketGenerator";
 import { getShareOrigin } from "../utils/shareUrl";
 import { copyText } from "../utils/clipboard";
 import {
@@ -101,15 +101,12 @@ export default function AdminPage() {
     }
   }
 
-  async function handleFault(match) {
-    const m = { ...matchMap[match.matchId] };
-    recordFault(m);
-
+  async function handlePersistMatch(match) {
     try {
-      await updateMatch(tournamentId, m);
+      await updateMatch(tournamentId, match);
     } catch (err) {
-      console.error("Error recording fault:", err);
-      alert("Failed to record fault. Please try again.");
+      console.error("Error saving match:", err);
+      alert("Failed to save. Please try again.");
     }
   }
 
@@ -171,7 +168,7 @@ export default function AdminPage() {
             tournamentId={tournamentId}
             onSetWin={handleSetWin}
             onUndo={handleUndo}
-            onFault={handleFault}
+            onPersistMatch={handlePersistMatch}
             onReset={handleReset}
             isAdmin={true}
           />

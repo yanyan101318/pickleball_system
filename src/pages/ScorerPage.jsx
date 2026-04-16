@@ -1,8 +1,8 @@
 // src/pages/ScorerPage.jsx
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { subscribeToMatch, updateMatch, updateNextMatch, setChampion, getTournamentInfo } from "../services/tournamentService";
-import { recordSetWin, undoLastSet, setsNeeded, setsTotal, recordPoint, recordFault } from "../utils/bracketGenerator";
+import { recordSetWin, undoLastSet, setsNeeded, setsTotal, recordPoint, getNextServer } from "../utils/bracketGenerator";
 import RulesReference from "../components/RulesReference";
 
 // localStorage helpers
@@ -45,6 +45,8 @@ export default function ScorerPage() {
   const [flashB, setFlashB]             = useState(null);
   const [toast, setToast]               = useState(null);
   const [showRules, setShowRules]       = useState(false);
+  const undoStackRef                  = useRef([]);
+  const [rallyUndoDepth, setRallyUndoDepth] = useState(0);
 
   useEffect(() => { getTournamentInfo(tournamentId).then(setTournamentInfo); }, [tournamentId]);
 
@@ -67,41 +69,84 @@ export default function ScorerPage() {
     setTimeout(() => setToast(null), 2500);
   }
 
-  function handleUndoPointA() {
-    if (localA > 0) {
-      setLocalA(localA - 1);
-      triggerFlash("A", "minus");
+  function cloneCurrentGame(cg) {
+    if (!cg) return null;
+    return { ...cg };
+  }
+
+  async function undoLastScoringAction() {
+    if (!match || match.winner || saving) return;
+    const snap = undoStackRef.current.pop();
+    if (!snap) {
+      showToast("Nothing to undo for this rally.", "error");
+      return;
+    }
+    setRallyUndoDepth((d) => Math.max(0, d - 1));
+    setSaving(true);
+    try {
+      setLocalA(snap.localA);
+      setLocalB(snap.localB);
+      const m = {
+        ...match,
+        sets: [...match.sets],
+        currentGame: snap.currentGame ? { ...snap.currentGame } : null,
+      };
+      await updateMatch(tournamentId, m);
+      showToast("Last rally action undone ↩");
+    } catch (err) {
+      console.error(err);
+      undoStackRef.current.push(snap);
+      setRallyUndoDepth((d) => d + 1);
+      showToast("Failed to undo. Try again.", "error");
+    } finally {
+      setSaving(false);
     }
   }
 
+  function handleUndoPointA() {
+    void undoLastScoringAction();
+  }
+
   function handleUndoPointB() {
-    if (localB > 0) {
-      setLocalB(localB - 1);
-      triggerFlash("B", "minus");
-    }
+    void undoLastScoringAction();
   }
 
   async function handlePointScored(scoringTeam) {
     if (!match || match.winner || saving || !match.teamA || !match.teamB) return;
-    
+
     setSaving(true);
     try {
-      const newScoreA = scoringTeam === "A" ? localA + 1 : localA;
-      const newScoreB = scoringTeam === "B" ? localB + 1 : localB;
-      
-      const result = recordPoint(match, scoringTeam, newScoreA, newScoreB);
-      
-      setLocalA(newScoreA);
-      setLocalB(newScoreB);
-      triggerFlash(scoringTeam, "plus");
-      
+      undoStackRef.current.push({
+        localA,
+        localB,
+        currentGame: cloneCurrentGame(match.currentGame),
+      });
+      setRallyUndoDepth((d) => d + 1);
+
+      const m = {
+        ...match,
+        sets: [...match.sets],
+        currentGame: match.currentGame
+          ? { ...match.currentGame }
+          : { ...getNextServer(match) },
+      };
+
+      let newScoreA = localA;
+      let newScoreB = localB;
+      if (m.currentGame.servingTeam === scoringTeam) {
+        if (scoringTeam === "A") newScoreA++;
+        else newScoreB++;
+      }
+
+      const result = recordPoint(m, scoringTeam, newScoreA, newScoreB);
+
       if (result.gameEnded) {
-        // Game auto-ended - record the set win
-        const m = { ...match, sets: [...match.sets] };
+        setLocalA(newScoreA);
+        setLocalB(newScoreB);
         recordSetWin(m, result.winner, { [m.matchId]: m }, result.scoreA, result.scoreB);
-        
+
         await updateMatch(tournamentId, m);
-        
+
         if (m.winner && m.nextMatchId) {
           const { getDoc, doc } = await import("firebase/firestore");
           const { db } = await import("../firebase");
@@ -113,39 +158,38 @@ export default function ScorerPage() {
             await updateNextMatch(tournamentId, nm);
           }
         }
-        
-        if (m.winner && !m.nextMatchId) await setChampion(tournamentId, m.winner);
-        
-        clearScore(matchId);
-        setLocalA(0); setLocalB(0);
-        showToast(`🎉 ${result.winner === "A" ? match.teamA : match.teamB} wins the game! Set recorded.`);
-      } else {
-        showToast(`Point: ${match.teamA} ${newScoreA} - ${match.teamB} ${newScoreB}`);
-      }
-    } catch (err) {
-      console.error(err);
-      showToast("Failed to record point. Try again.", "error");
-    } finally {
-      setSaving(false);
-    }
-  }
 
-  async function handleFaultServing() {
-    if (!match || match.winner || saving || !match.teamA || !match.teamB) return;
-    
-    setSaving(true);
-    try {
-      const m = { ...match, sets: [...match.sets] };
-      const faultResult = recordFault(m);
-      
-      const servingIs = faultResult.servingTeam === "A" ? match.teamA : match.teamB;
-      const isFirstServer = faultResult.firstServer ? "1st server" : "2nd server";
-      
+        if (m.winner && !m.nextMatchId) await setChampion(tournamentId, m.winner);
+
+        clearScore(matchId);
+        setLocalA(0);
+        setLocalB(0);
+        undoStackRef.current = [];
+        setRallyUndoDepth(0);
+        triggerFlash(scoringTeam, "plus");
+        showToast(`🎉 ${result.winner === "A" ? match.teamA : match.teamB} wins the game! Set recorded.`);
+        return;
+      }
+
+      if (result.fault) {
+        await updateMatch(tournamentId, m);
+        const srv = m.currentGame.servingTeam === "A" ? match.teamA : match.teamB;
+        const srvLabel = m.currentGame.firstServer ? "1st Serve" : "2nd Serve";
+        triggerFlash(scoringTeam, "plus");
+        showToast(`Serve fault — now ${srv} (${srvLabel})`);
+        return;
+      }
+
+      setLocalA(newScoreA);
+      setLocalB(newScoreB);
       await updateMatch(tournamentId, m);
-      showToast(`⚠️ Fault! Now: ${servingIs} serving (${isFirstServer})`);
+      triggerFlash(scoringTeam, "plus");
+      showToast(`Point: ${match.teamA} ${newScoreA} - ${match.teamB} ${newScoreB}`);
     } catch (err) {
       console.error(err);
-      showToast("Failed to record fault. Try again.", "error");
+      undoStackRef.current.pop();
+      setRallyUndoDepth((d) => Math.max(0, d - 1));
+      showToast("Failed to record point. Try again.", "error");
     } finally {
       setSaving(false);
     }
@@ -171,6 +215,8 @@ export default function ScorerPage() {
         }
       }
       clearScore(matchId); setLocalA(0); setLocalB(0);
+      undoStackRef.current = [];
+      setRallyUndoDepth(0);
       showToast("Last set undone ↩");
     } catch (err) { console.error(err); }
     setSaving(false);
@@ -309,18 +355,18 @@ export default function ScorerPage() {
                 <button 
                   className="sp-score-btn sp-btn-plus" 
                   onClick={() => handlePointScored("A")} 
-                  disabled={saving || !teamB || match.currentGame?.servingTeam !== "A"}
-                  style={{width: "100%", fontSize: "1rem", opacity: (match.currentGame?.servingTeam !== "A") ? 0.4 : 1, cursor: (match.currentGame?.servingTeam !== "A") ? "not-allowed" : "pointer"}}
+                  disabled={saving || !teamB}
+                  style={{width: "100%", fontSize: "1rem"}}
                 >
                   <span>POINT</span>
                 </button>
                 <button 
                   className="sp-score-btn sp-btn-minus" 
                   onClick={() => handleUndoPointA()}
-                  disabled={localA === 0}
-                  style={{width: "100%", fontSize: "0.9rem", opacity: localA === 0 ? 0.4 : 1, cursor: localA === 0 ? "not-allowed" : "pointer"}}
+                  disabled={saving || rallyUndoDepth === 0}
+                  style={{width: "100%", fontSize: "0.9rem", opacity: rallyUndoDepth === 0 ? 0.4 : 1, cursor: rallyUndoDepth === 0 ? "not-allowed" : "pointer"}}
                 >
-                  <span>UNDO (−1)</span>
+                  <span>UNDO</span>
                 </button>
               </div>
               {format !== "bo1" && (
@@ -335,16 +381,10 @@ export default function ScorerPage() {
             {/* Center VS */}
             <div className="sp-vs-col">
               <div className="sp-vs-text">VS</div>
-              <button 
-                className="sp-score-btn sp-btn-minus"
-                onClick={() => handleFaultServing()}
-                disabled={saving || !teamB}
-                style={{marginTop: "auto", marginBottom: "auto", fontSize: "0.75rem", width: "56px", height: "56px"}}
-                title="Fault by serving team"
-              >
-                <span>⚠️</span>
-                <span>FAULT</span>
-              </button>
+              <div
+                aria-hidden="true"
+                style={{ marginTop: "auto", marginBottom: "auto", width: "56px", height: "56px", flexShrink: 0 }}
+              />
               {format !== "bo1" && (
                 <>
                   <div className="sp-set-dots">
@@ -376,18 +416,18 @@ export default function ScorerPage() {
                 <button 
                   className="sp-score-btn sp-btn-plus" 
                   onClick={() => handlePointScored("B")} 
-                  disabled={saving || !teamB || match.currentGame?.servingTeam !== "B"}
-                  style={{width: "100%", marginTop: "0", fontSize: "1rem", background: "linear-gradient(145deg, #2a1500, #1c0f00)", borderColor: "#f9731655", opacity: (match.currentGame?.servingTeam !== "B") ? 0.4 : 1, cursor: (match.currentGame?.servingTeam !== "B") ? "not-allowed" : "pointer"}}
+                  disabled={saving || !teamB}
+                  style={{width: "100%", marginTop: "0", fontSize: "1rem", background: "linear-gradient(145deg, #2a1500, #1c0f00)", borderColor: "#f9731655"}}
                 >
                   <span>POINT</span>
                 </button>
                 <button 
                   className="sp-score-btn sp-btn-minus" 
                   onClick={() => handleUndoPointB()}
-                  disabled={localB === 0}
-                  style={{width: "100%", fontSize: "0.9rem", opacity: localB === 0 ? 0.4 : 1, cursor: localB === 0 ? "not-allowed" : "pointer"}}
+                  disabled={saving || rallyUndoDepth === 0}
+                  style={{width: "100%", fontSize: "0.9rem", opacity: rallyUndoDepth === 0 ? 0.4 : 1, cursor: rallyUndoDepth === 0 ? "not-allowed" : "pointer"}}
                 >
-                  <span>UNDO (−1)</span>
+                  <span>UNDO</span>
                 </button>
               </div>
               {format !== "bo1" && (

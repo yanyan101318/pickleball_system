@@ -78,13 +78,27 @@ export function recordFault(match) {
   };
 }
 
-// Record a point for a team and check if game ended
+// Record a point for a team and check if game ended.
+// Traditional pickleball: only the serving team can score points. If the receiving team
+// "scores" (receiver POINT button), it is a fault on the serve — no points change; 1st→2nd
+// serve or side out (same as recordFault).
 export function recordPoint(match, scoringTeam, scoreA, scoreB) {
-  // Check if game is won (auto-end at 11 with 2-point lead or race to 2 after 10-10)
+  const current = match.currentGame || getNextServer(match);
+  const servingTeam = current.servingTeam;
+
+  if (scoringTeam !== servingTeam) {
+    const newServing = handleFault(match);
+    match.currentGame = newServing;
+    return {
+      gameEnded: false,
+      fault: true,
+      serving: newServing,
+    };
+  }
+
   const gameWinner = getGameWinner(scoreA, scoreB);
-  
+
   if (gameWinner) {
-    // Game ends, record as a set win
     return {
       gameEnded: true,
       winner: gameWinner,
@@ -92,14 +106,13 @@ export function recordPoint(match, scoringTeam, scoreA, scoreB) {
       scoreB,
     };
   }
-  
-  // Game continues - advance server after point
+
   const nextServing = advanceServer(match);
   match.currentGame = nextServing;
-  
+
   return {
     gameEnded: false,
-    winner: null,
+    fault: false,
     serving: nextServing,
   };
 }

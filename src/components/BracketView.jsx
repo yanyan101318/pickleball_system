@@ -40,7 +40,7 @@ function clearAllScores() {
 
 export default function BracketView({
   tournamentName, rounds, format, tournamentId,
-  onSetWin, onUndo, onFault, onReset,
+  onSetWin, onUndo, onPersistMatch, onReset,
 }) {
   const [activeMatch, setActiveMatch] = useState(null);
   const [showConfirm, setShowConfirm]  = useState(false);
@@ -247,7 +247,7 @@ export default function BracketView({
           match={latestActive}
           onSetWin={handleSetWin}
           onUndo={onUndo}
-          onFault={onFault}
+          onPersistMatch={onPersistMatch}
           onClose={() => setActiveMatch(null)}
         />
       )}

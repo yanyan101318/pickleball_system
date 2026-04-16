@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import SetupForm from "../components/SetupForm";
 import BracketView from "../components/BracketView";
-import { generateBracket, recordSetWin, undoLastSet, recordFault } from "../utils/bracketGenerator";
+import { generateBracket, recordSetWin, undoLastSet } from "../utils/bracketGenerator";
 import {
   createTournament, updateMatch, updateNextMatch,
   setChampion, generateTournamentId, subscribeToMatches,
@@ -162,10 +162,12 @@ export default function AdminTournament() {
     }
   }
 
-  function handleFault(match) {
-    const m = { ...matchMap[match.matchId] };
-    recordFault(m);
-    updateMatch(tournamentId, m);
+  async function handlePersistMatch(match) {
+    try {
+      await updateMatch(tournamentId, match);
+    } catch (err) {
+      console.error("Error saving match:", err);
+    }
   }
 
   if (saving) return (
@@ -206,7 +208,7 @@ export default function AdminTournament() {
           tournamentId={tournamentId}
           onSetWin={handleSetWin}
           onUndo={handleUndo}
-          onFault={handleFault}
+          onPersistMatch={handlePersistMatch}
           onReset={() => {
             localStorage.removeItem('adminTournamentId');
             setTournament(null);
