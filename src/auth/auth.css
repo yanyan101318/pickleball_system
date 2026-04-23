@@ -144,6 +144,155 @@ select.af-input {
 .auth-link { color: #16a34a; font-weight: 600; text-decoration: none; }
 .auth-link:hover { text-decoration: underline; }
 
+.auth-link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  display: inline;
+}
+
+/* Admin registration modal */
+.auth-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  animation: authModalBackdropIn 0.28s ease forwards;
+}
+
+@keyframes authModalBackdropIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.auth-modal-panel {
+  width: 100%;
+  max-width: 420px;
+  background: #161b25;
+  border: 1px solid #2a3348;
+  border-radius: 20px;
+  padding: 1.75rem 1.75rem 1.5rem;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+  animation: authModalPanelIn 0.36s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes authModalPanelIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.auth-modal-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #e2e8f0;
+  margin: 0 0 0.5rem;
+}
+
+.auth-modal-desc {
+  font-size: 0.88rem;
+  color: #94a3b8;
+  margin: 0 0 1.25rem;
+  line-height: 1.45;
+}
+
+.auth-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.auth-modal-error {
+  margin-top: 0.25rem;
+}
+
+.auth-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+
+.auth-modal-cancel {
+  padding: 0.65rem 1.1rem;
+  border-radius: 10px;
+  border: 1px solid #2a3348;
+  background: transparent;
+  color: #cbd5e1;
+  font-size: 0.92rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.auth-modal-cancel:hover {
+  border-color: #475569;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.auth-modal-confirm {
+  padding: 0.65rem 1.25rem;
+  border-radius: 10px;
+  border: none;
+  background: #16a34a;
+  color: #fff;
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.auth-modal-confirm:hover {
+  background: #15803d;
+  transform: translateY(-1px);
+}
+
+/* Register: single role display */
+.af-role-single {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.75rem 1rem;
+  border: 1.5px solid #c8e63a;
+  border-radius: 10px;
+  background: rgba(200, 230, 58, 0.12);
+  color: #c8e63a;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.af-role-single-icon {
+  font-size: 1.1rem;
+}
+
+.auth-success-note {
+  font-size: 0.9rem;
+  color: #94a3b8;
+  line-height: 1.5;
+  margin: 0 0 1.5rem;
+}
+
+.auth-success-link {
+  text-decoration: none;
+  text-align: center;
+  box-sizing: border-box;
+}
+
 /* ── PROTECTED ROUTE LOADING ─── */
 .pr-loading {
   min-height: 100vh; display: flex; flex-direction: column;

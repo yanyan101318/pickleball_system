@@ -1,9 +1,15 @@
 // src/auth/LoginPage.jsx
 import { useState } from "react";
-import { signInWithEmailAndPassword } from "firebase/auth";
+import { signInWithEmailAndPassword, signOut } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { auth, db } from "../firebase";
+import { grantRegisterAccess } from "./registerAccess";
+
+/** Prefer REACT_APP_ADMIN_REGISTRATION_CODE in env; fallback for local/dev only. */
+function getExpectedAdminCode() {
+  return process.env.REACT_APP_ADMIN_REGISTRATION_CODE || "admin123";
+}
 
 export default function LoginPage() {
   const [email, setEmail]       = useState("");
@@ -11,7 +17,35 @@ export default function LoginPage() {
   const [error, setError]       = useState("");
   const [loading, setLoading]   = useState(false);
   const [showPass, setShowPass] = useState(false);
+  const [registerModalOpen, setRegisterModalOpen] = useState(false);
+  const [adminCode, setAdminCode] = useState("");
+  const [adminCodeError, setAdminCodeError] = useState("");
   const navigate = useNavigate();
+
+  function openRegisterModal() {
+    setAdminCode("");
+    setAdminCodeError("");
+    setRegisterModalOpen(true);
+  }
+
+  function closeRegisterModal() {
+    setRegisterModalOpen(false);
+    setAdminCode("");
+    setAdminCodeError("");
+  }
+
+  function handleAdminCodeSubmit(e) {
+    e.preventDefault();
+    setAdminCodeError("");
+    const expected = getExpectedAdminCode();
+    if (adminCode.trim() !== expected) {
+      setAdminCodeError("Invalid admin code");
+      return;
+    }
+    grantRegisterAccess();
+    closeRegisterModal();
+    navigate("/register", { replace: false });
+  }
 
   async function handleLogin(e) {
     e.preventDefault();
@@ -19,12 +53,19 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const cred = await signInWithEmailAndPassword(auth, email, password);
+      if (!cred.user.emailVerified) {
+        await signOut(auth);
+        setError("Please verify your email before logging in.");
+        setLoading(false);
+        return;
+      }
       const snap = await getDoc(doc(db, "users", cred.user.uid));
       if (snap.exists()) {
         const role = snap.data().role;
         if (role === "admin")    navigate("/admin/dashboard", { replace: true });
         else                     navigate("/user/home",       { replace: true });
       } else {
+        await signOut(auth);
         setError("User profile not found. Contact admin.");
       }
     } catch (err) {
@@ -106,11 +147,64 @@ export default function LoginPage() {
           </form>
 
           <div className="auth-card-footer">
-            Don't have an account?{" "}
-            <Link to="/register" className="auth-link">Register here</Link>
+            Don&apos;t have an account?{" "}
+            <button type="button" className="auth-link auth-link-btn" onClick={openRegisterModal}>
+              Register here
+            </button>
           </div>
         </div>
       </div>
+
+      {registerModalOpen && (
+        <div
+          className="auth-modal-backdrop"
+          role="presentation"
+          onClick={closeRegisterModal}
+        >
+          <div
+            className="auth-modal-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="auth-modal-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="auth-modal-title" className="auth-modal-title">
+              Administrator access
+            </h3>
+            <p className="auth-modal-desc">
+              Enter the admin registration code to create an administrator account.
+            </p>
+            <form className="auth-modal-form" onSubmit={handleAdminCodeSubmit}>
+              <label className="af-label" htmlFor="admin-access-code">
+                Admin code
+              </label>
+              <input
+                id="admin-access-code"
+                className="af-input"
+                type="password"
+                autoComplete="off"
+                value={adminCode}
+                onChange={(e) => setAdminCode(e.target.value)}
+                placeholder="Enter code"
+              />
+              {adminCodeError && (
+                <div className="af-error auth-modal-error">
+                  <span>⚠</span>
+                  {adminCodeError}
+                </div>
+              )}
+              <div className="auth-modal-actions">
+                <button type="button" className="auth-modal-cancel" onClick={closeRegisterModal}>
+                  Cancel
+                </button>
+                <button type="submit" className="auth-modal-confirm">
+                  Continue
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
