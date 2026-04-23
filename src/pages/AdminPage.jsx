@@ -15,6 +15,7 @@ import {
   subscribeToMatches,
   subscribeToTournamentInfo,
 } from "../services/tournamentService";
+import { getStoredScoringMode } from "../utils/scoringModeStorage";
 
 export default function AdminPage() {
   const [tournament, setTournament] = useState(null);
@@ -46,12 +47,12 @@ export default function AdminPage() {
     };
   }, [tournamentId]);
 
-  async function handleStart(name, teams, format) {
+  async function handleStart(name, teams, format, tournamentFormat, scoringMode) {
     setSaving(true);
     try {
-      const { rounds, matchMap } = generateBracket(teams, format);
+      const { rounds, matchMap } = generateBracket(teams, format, tournamentFormat || "single-elimination");
       const tId = generateTournamentId(name);
-      await createTournament(tId, name, format, matchMap);
+      await createTournament(tId, name, format, matchMap, tournamentFormat || "single-elimination", scoringMode);
       setTournamentId(tId);
       setTournament({ name, format });
       // matchMap will be loaded from Firebase subscription
@@ -65,7 +66,8 @@ export default function AdminPage() {
   async function handleSetWin(match, winner, scoreA, scoreB) {
     const m = { ...matchMap[match.matchId] };
     const clonedMap = { ...matchMap, [m.matchId]: m };
-    recordSetWin(m, winner, clonedMap, scoreA, scoreB);
+    const mode = getStoredScoringMode(m.matchId, info?.scoringMode ?? "traditional");
+    recordSetWin(m, winner, clonedMap, scoreA, scoreB, mode);
 
     try {
       // Save to Firestore
@@ -166,6 +168,7 @@ export default function AdminPage() {
             rounds={rounds}
             format={tournament.format}
             tournamentId={tournamentId}
+            scoringMode={info?.scoringMode ?? "traditional"}
             onSetWin={handleSetWin}
             onUndo={handleUndo}
             onPersistMatch={handlePersistMatch}

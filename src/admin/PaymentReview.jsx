@@ -1,5 +1,6 @@
 // src/admin/PaymentReview.jsx
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   collection, query, orderBy, onSnapshot,
   doc, updateDoc, deleteDoc, Timestamp,
@@ -7,12 +8,24 @@ import {
 import { db } from "../firebase";
 
 export default function PaymentReview() {
+  const [searchParams] = useSearchParams();
+  const view = searchParams.get("view") || "booking";
+
   const [payments, setPayments] = useState([]);
-  const [filter, setFilter]     = useState("All");
+  const [filter, setFilter]     = useState(() => {
+    const v = searchParams.get("view");
+    return v === "pending" || v === "approvals" ? "Pending" : "All";
+  });
   const [search, setSearch]     = useState("");
   const [loading, setLoading]   = useState(true);
   const [acting, setActing]     = useState(null);
   const [preview, setPreview]   = useState(null); // { payment, imageUrl }
+
+  useEffect(() => {
+    const v = searchParams.get("view");
+    if (v === "pending" || v === "approvals") setFilter("Pending");
+    else setFilter("All");
+  }, [searchParams]);
 
   useEffect(() => {
     const q = query(collection(db,"payments"), orderBy("createdAt","desc"));
@@ -22,6 +35,17 @@ export default function PaymentReview() {
     });
     return () => unsub();
   }, []);
+
+  const pageTitle =
+    filter === "Pending" && view === "approvals"
+      ? "Payment approvals"
+      : filter === "Pending"
+        ? "Pending booking payments"
+        : "Booking payments";
+  const pageSub =
+    filter === "All"
+      ? "Court and booking payments only — retail POS sales are under Sales → POS."
+      : "Review payment screenshots and approve or reject submitted booking payments.";
 
   async function setStatus(id, status) {
     setActing(id);
@@ -79,8 +103,8 @@ export default function PaymentReview() {
     <div className="ad-page">
       <div className="ad-page-header">
         <div>
-          <h1 className="ad-page-title">Payment Review</h1>
-          <p className="ad-page-sub">Review payment screenshots and approve or reject payments.</p>
+          <h1 className="ad-page-title">{pageTitle}</h1>
+          <p className="ad-page-sub">{pageSub}</p>
         </div>
       </div>
 

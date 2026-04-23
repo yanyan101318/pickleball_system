@@ -1,6 +1,22 @@
 // src/components/ScoreModal.jsx
 import { useState, useEffect, useRef } from "react";
-import { setsNeeded, setsTotal, isGameWon, getGameWinner, recordPoint, getNextServer } from "../utils/bracketGenerator";
+import {
+  setsNeeded,
+  setsTotal,
+  isGameWon,
+  getGameWinner,
+  isRallyGameWon,
+  getRallyGameWinner,
+  recordPoint,
+  recordRallyPoint,
+  getNextServer,
+} from "../utils/bracketGenerator";
+import {
+  getStoredScoringMode,
+  setStoredScoringMode,
+  getCourtSwap,
+  setCourtSwap,
+} from "../utils/scoringModeStorage";
 
 function getStoredScore(matchId) {
   try {
@@ -21,7 +37,14 @@ function clearScore(matchId) {
   try { localStorage.removeItem(`score_${matchId}`); } catch (_) {}
 }
 
-export default function ScoreModal({ match, onSetWin, onUndo, onPersistMatch, onClose }) {
+export default function ScoreModal({
+  match,
+  tournamentScoringMode = "traditional",
+  onSetWin,
+  onUndo,
+  onPersistMatch,
+  onClose,
+}) {
   const { teamA, teamB, sets = [], winner, format, matchId } = match;
   const needed = setsNeeded(format);
   const total  = setsTotal(format);
@@ -36,6 +59,12 @@ export default function ScoreModal({ match, onSetWin, onUndo, onPersistMatch, on
   const [saving, setSaving] = useState(false);
   const undoStackRef = useRef([]);
   const [rallyUndoDepth, setRallyUndoDepth] = useState(0);
+  const [scoringMode, setScoringMode] = useState(() =>
+    getStoredScoringMode(matchId, tournamentScoringMode),
+  );
+  const [courtSwapped, setCourtSwapped] = useState(() => getCourtSwap(matchId));
+  const [showCourtChangePopup, setShowCourtChangePopup] = useState(false);
+  const crossedElevenRef = useRef(false);
 
   function cloneCurrentGame(cg) {
     if (!cg) return null;
@@ -48,13 +77,41 @@ export default function ScoreModal({ match, onSetWin, onUndo, onPersistMatch, on
     setLocalB(saved.b);
   }, [matchId]);
 
+  useEffect(() => {
+    setScoringMode(getStoredScoringMode(matchId, tournamentScoringMode));
+  }, [matchId, tournamentScoringMode]);
+
+  useEffect(() => {
+    setCourtSwapped(getCourtSwap(matchId));
+  }, [matchId]);
+
   useEffect(() => { saveScore(matchId, localA, localB); }, [matchId, localA, localB]);
+
+  useEffect(() => {
+    if (localA === 0 && localB === 0) crossedElevenRef.current = false;
+  }, [localA, localB]);
+
+  useEffect(() => {
+    if (scoringMode !== "rally") return;
+    const max = Math.max(localA, localB);
+    if (max >= 11 && !crossedElevenRef.current) {
+      crossedElevenRef.current = true;
+      setShowCourtChangePopup(true);
+    }
+  }, [localA, localB, scoringMode]);
 
   // Auto-detect when game ends
   useEffect(() => {
-    if (isGameWon(localA, localB) && !autoGameEnded && (localA > 0 || localB > 0)) {
+    const won =
+      scoringMode === "rally"
+        ? isRallyGameWon(localA, localB)
+        : isGameWon(localA, localB);
+    if (won && !autoGameEnded && (localA > 0 || localB > 0)) {
       setAutoGameEnded(true);
-      const winningTeam = getGameWinner(localA, localB);
+      const winningTeam =
+        scoringMode === "rally"
+          ? getRallyGameWinner(localA, localB)
+          : getGameWinner(localA, localB);
       // Trigger auto set win after a brief delay for UI feedback
       setTimeout(() => {
         onSetWin(match, winningTeam, localA, localB);
@@ -65,7 +122,7 @@ export default function ScoreModal({ match, onSetWin, onUndo, onPersistMatch, on
         undoStackRef.current = [];
       }, 500);
     }
-  }, [localA, localB, autoGameEnded, match, onSetWin, matchId]);
+  }, [localA, localB, autoGameEnded, match, onSetWin, matchId, scoringMode]);
 
   function triggerFlash(side, type) {
     if (side === "A") { setFlashA(type); setTimeout(() => setFlashA(null), 300); }
@@ -94,12 +151,18 @@ export default function ScoreModal({ match, onSetWin, onUndo, onPersistMatch, on
 
       let newScoreA = localA;
       let newScoreB = localB;
-      if (m.currentGame.servingTeam === scoringTeam) {
+      let result;
+      if (scoringMode === "rally") {
         if (scoringTeam === "A") newScoreA++;
         else newScoreB++;
+        result = recordRallyPoint(m, scoringTeam, newScoreA, newScoreB);
+      } else {
+        if (m.currentGame.servingTeam === scoringTeam) {
+          if (scoringTeam === "A") newScoreA++;
+          else newScoreB++;
+        }
+        result = recordPoint(m, scoringTeam, newScoreA, newScoreB);
       }
-
-      const result = recordPoint(m, scoringTeam, newScoreA, newScoreB);
 
       if (result.gameEnded) {
         setLocalA(newScoreA);
@@ -188,13 +251,22 @@ export default function ScoreModal({ match, onSetWin, onUndo, onPersistMatch, on
 
   return (
     <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal-box">
+      <div className="modal-box" style={{ position: "relative" }}>
 
         {/* Header */}
         <div className="modal-hdr">
           <div className="modal-hdr-left">
             <span className="modal-match-id">{matchId}</span>
             <span className="modal-format-tag">{formatLabel()}</span>
+            <span
+              className="modal-format-tag"
+              style={{
+                borderColor: scoringMode === "rally" ? "var(--pickle)" : undefined,
+                color: scoringMode === "rally" ? "var(--pickle)" : undefined,
+              }}
+            >
+              {scoringMode === "rally" ? "Rally (21)" : "Traditional (11)"}
+            </span>
             {hasUnsaved && <span className="score-saved-badge">● Score saved locally</span>}
           </div>
           <div className="modal-hdr-actions" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -213,14 +285,101 @@ export default function ScoreModal({ match, onSetWin, onUndo, onPersistMatch, on
           </div>
         </div>
 
+        {!winner && (
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "10px",
+              padding: "10px 14px",
+              borderBottom: "1px solid var(--border)",
+              background: "rgba(0,0,0,0.15)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+              <span style={{ fontSize: "0.65rem", color: "var(--text-muted)", textTransform: "uppercase" }}>Mode</span>
+              <div style={{ display: "inline-flex", borderRadius: "8px", overflow: "hidden", border: "1px solid var(--border)" }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScoringMode("traditional");
+                    setStoredScoringMode(matchId, "traditional");
+                  }}
+                  disabled={saving}
+                  style={{
+                    padding: "6px 12px",
+                    fontSize: "0.75rem",
+                    fontWeight: 700,
+                    border: "none",
+                    cursor: saving ? "not-allowed" : "pointer",
+                    background: scoringMode === "traditional" ? "rgba(200,230,58,0.15)" : "transparent",
+                  }}
+                >
+                  Traditional
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScoringMode("rally");
+                    setStoredScoringMode(matchId, "rally");
+                  }}
+                  disabled={saving}
+                  style={{
+                    padding: "6px 12px",
+                    fontSize: "0.75rem",
+                    fontWeight: 700,
+                    border: "none",
+                    borderLeft: "1px solid var(--border)",
+                    cursor: saving ? "not-allowed" : "pointer",
+                    background: scoringMode === "rally" ? "rgba(200,230,58,0.15)" : "transparent",
+                  }}
+                >
+                  Rally
+                </button>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setCourtSwapped((v) => {
+                  const n = !v;
+                  setCourtSwap(matchId, n);
+                  return n;
+                });
+              }}
+              disabled={saving}
+              style={{
+                padding: "6px 14px",
+                fontSize: "0.78rem",
+                fontWeight: 700,
+                borderRadius: "8px",
+                border: "1px solid #c8e63a44",
+                background: "linear-gradient(145deg, #1a2410, #121a0c)",
+                color: "var(--pickle)",
+                cursor: saving ? "not-allowed" : "pointer",
+              }}
+            >
+              ⇄ Change court
+            </button>
+          </div>
+        )}
+
         {/* Game Status and Serving Info */}
         {!winner && (localA > 0 || localB > 0) && (
           <div className="modal-game-info">
             <div className="game-info-row">
               <div className="game-status">
                 <span className="status-label">🎮 Game Status</span>
-                {isGameWon(localA, localB) ? (
+                {(scoringMode === "rally" ? isRallyGameWon(localA, localB) : isGameWon(localA, localB)) ? (
                   <span className="status-value ready">🎯 Auto-Recording...</span>
+                ) : scoringMode === "rally" ? (
+                  localA >= 20 || localB >= 20 ? (
+                    <span className="status-value close">⚡ Close (need 2-point lead)</span>
+                  ) : (
+                    <span className="status-value playing">Playing ({Math.max(localA, localB)} pts)</span>
+                  )
                 ) : localA >= 10 || localB >= 10 ? (
                   <span className="status-value close">⚡ Close (need 2-point lead)</span>
                 ) : (
@@ -232,7 +391,9 @@ export default function ScoreModal({ match, onSetWin, onUndo, onPersistMatch, on
                 <span className="serving-value">
                   {match.currentGame?.servingTeam === "A" ? teamA : teamB}
                   {match.currentGame?.servingSide && ` (${match.currentGame.servingSide === "right" ? "▶" : "◀"})`}
-                  {match.currentGame?.firstServer ? " [1st]" : " [2nd]"}
+                  {scoringMode === "rally"
+                    ? (match.currentGame?.servingSide === "right" ? " [R]" : " [L]")
+                    : (match.currentGame?.firstServer ? " [1st]" : " [2nd]")}
                 </span>
               </div>
             </div>
@@ -259,13 +420,15 @@ export default function ScoreModal({ match, onSetWin, onUndo, onPersistMatch, on
             <div className="score-panels">
 
               {/* Team A */}
-              <div className="score-panel panel-a">
+              <div className="score-panel panel-a" style={{ order: courtSwapped ? 3 : 1 }}>
                 <div className="panel-avatar avatar-a">{initials(teamA)}</div>
                 <div className="panel-name">
                   {teamA}
                   {match.currentGame?.servingTeam === "A" && (
                     <div style={{fontSize: "0.7rem", color: "var(--pickle)", marginTop: "4px", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.5px"}}>
-                      {match.currentGame.firstServer ? "🎾 1ST SERVER" : "🎾 2ND SERVER"}
+                      {scoringMode === "rally"
+                        ? (match.currentGame.servingSide === "right" ? "🎾 RIGHT COURT" : "🎾 LEFT COURT")
+                        : (match.currentGame.firstServer ? "🎾 1ST SERVER" : "🎾 2ND SERVER")}
                     </div>
                   )}
                 </div>
@@ -305,7 +468,7 @@ export default function ScoreModal({ match, onSetWin, onUndo, onPersistMatch, on
               </div>
 
               {/* Center */}
-              <div className="score-center">
+              <div className="score-center" style={{ order: 2 }}>
                 <div className="score-center-vs">VS</div>
                 <div
                   aria-hidden="true"
@@ -325,13 +488,15 @@ export default function ScoreModal({ match, onSetWin, onUndo, onPersistMatch, on
               </div>
 
               {/* Team B */}
-              <div className="score-panel panel-b">
+              <div className="score-panel panel-b" style={{ order: courtSwapped ? 1 : 3 }}>
                 <div className="panel-avatar avatar-b">{initials(teamB)}</div>
                 <div className="panel-name">
                   {teamB}
                   {match.currentGame?.servingTeam === "B" && (
                     <div style={{fontSize: "0.7rem", color: "var(--pickle)", marginTop: "4px", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.5px"}}>
-                      {match.currentGame.firstServer ? "🎾 1ST SERVER" : "🎾 2ND SERVER"}
+                      {scoringMode === "rally"
+                        ? (match.currentGame.servingSide === "right" ? "🎾 RIGHT COURT" : "🎾 LEFT COURT")
+                        : (match.currentGame.firstServer ? "🎾 1ST SERVER" : "🎾 2ND SERVER")}
                     </div>
                   )}
                 </div>
@@ -384,6 +549,40 @@ export default function ScoreModal({ match, onSetWin, onUndo, onPersistMatch, on
               </div>
             )}
           </>
+        )}
+
+        {showCourtChangePopup && scoringMode === "rally" && !winner && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 30,
+              background: "rgba(0,0,0,0.7)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "16px",
+            }}
+            onClick={() => setShowCourtChangePopup(false)}
+            role="presentation"
+          >
+            <div
+              className="confirm-box"
+              onClick={(e) => e.stopPropagation()}
+              style={{ maxWidth: "380px", textAlign: "center", position: "relative", zIndex: 31 }}
+            >
+              <div style={{ fontSize: "2rem", marginBottom: "8px" }}>↔️</div>
+              <div style={{ fontWeight: 800, fontSize: "1.05rem", marginBottom: "8px", color: "var(--pickle)" }}>
+                Change court now
+              </div>
+              <p style={{ fontSize: "0.88rem", color: "var(--text-muted)", marginBottom: "14px", lineHeight: 1.45 }}>
+                A team has reached 11 points. Switch sides on the court, then tap <strong>Change court</strong> if the display should match.
+              </p>
+              <button type="button" className="confirm-proceed" style={{ width: "100%" }} onClick={() => setShowCourtChangePopup(false)}>
+                OK
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </div>

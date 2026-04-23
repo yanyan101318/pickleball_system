@@ -53,6 +53,50 @@ function StatCard({ icon, label, value, sub, color, status }) {
   );
 }
 
+function productStockDash(p) {
+  const n = p?.stock ?? p?.quantity ?? p?.qty;
+  const v = Number(n);
+  return Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0;
+}
+
+function PosStatTile({ icon, label, value, sub, accent }) {
+  const ring =
+    accent === "emerald"
+      ? "border-emerald-500/35 shadow-[0_0_24px_rgba(16,185,129,0.12)]"
+      : accent === "amber"
+        ? "border-amber-500/35 shadow-[0_0_24px_rgba(245,158,11,0.12)]"
+        : accent === "violet"
+          ? "border-violet-500/35 shadow-[0_0_24px_rgba(139,92,246,0.12)]"
+          : "border-cyan-500/40 shadow-[0_0_28px_rgba(34,211,238,0.15)]";
+  const iconWrap =
+    accent === "emerald"
+      ? "bg-emerald-500/15 text-emerald-400"
+      : accent === "amber"
+        ? "bg-amber-500/15 text-amber-400"
+        : accent === "violet"
+          ? "bg-violet-500/15 text-violet-300"
+          : "bg-cyan-500/15 text-cyan-400";
+  return (
+    <div
+      className={`bg-[#151e2d] border rounded-xl p-4 transition-all hover:border-cyan-500/45 group ${ring}`}
+    >
+      <div className="flex justify-between items-start mb-3">
+        <div className={`p-2 rounded-lg ${iconWrap}`}>
+          <span className="material-symbols-outlined text-xl">{icon}</span>
+        </div>
+        <span className="text-[9px] font-bold uppercase tracking-tight text-cyan-500/80">POS</span>
+      </div>
+      <div className="space-y-0.5">
+        <h3 className="text-2xl font-black text-white tracking-tighter tabular-nums">{value}</h3>
+        <p className="text-slate-400 font-semibold uppercase text-[10px] tracking-wider">{label}</p>
+      </div>
+      <div className="mt-3 pt-3 border-t border-slate-800/50">
+        <span className="text-[10px] text-slate-500 font-medium leading-snug">{sub}</span>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminDashboard() {
   const { profile } = useAuth();
   const [stats, setStats] = useState({
@@ -67,6 +111,15 @@ export default function AdminDashboard() {
   const [feedBookings, setFeedBookings] = useState([]);
   const [feedPayments, setFeedPayments] = useState([]);
   const [feedLogs, setFeedLogs] = useState([]);
+
+  const [posRetail, setPosRetail] = useState({
+    dailySales: 0,
+    transactionsToday: 0,
+    bestSellerName: "—",
+    bestSellerUnits: 0,
+    lowStockSummary: "No product data",
+    lowStockCount: 0,
+  });
 
   const activityEvents = useMemo(
     () => buildActivityEvents({ bookings: feedBookings, payments: feedPayments, logs: feedLogs }).slice(0, 50),
@@ -148,6 +201,85 @@ export default function AdminDashboard() {
     };
   }, []);
 
+  useEffect(() => {
+    let txs = [];
+    let products = [];
+
+    function recompute() {
+      const start = new Date();
+      start.setHours(0, 0, 0, 0);
+      const todayTxs = txs.filter((t) => {
+        const d = t.createdAt?.toDate?.();
+        return d && d >= start && t.type === "pos";
+      });
+      const dailySales = todayTxs.reduce((s, t) => s + (Number(t.total) || 0), 0);
+      const transactionsToday = todayTxs.length;
+
+      const qtyByName = {};
+      for (const t of todayTxs) {
+        for (const line of t.items || []) {
+          const nm = line.name || "Item";
+          qtyByName[nm] = (qtyByName[nm] || 0) + (Number(line.quantity) || 0);
+        }
+      }
+      let bestName = null;
+      let bestQty = 0;
+      for (const [name, q] of Object.entries(qtyByName)) {
+        if (q > bestQty) {
+          bestQty = q;
+          bestName = name;
+        }
+      }
+      const bestSellerName = bestName && bestQty > 0 ? bestName : "—";
+
+      const low = products
+        .map((p) => ({ name: p.name || "Product", stock: productStockDash(p) }))
+        .filter((p) => p.stock <= 5)
+        .sort((a, b) => a.stock - b.stock)
+        .slice(0, 4);
+      let lowStockSummary =
+        low.length === 0
+          ? products.length === 0
+            ? "Add items to the products collection"
+            : "All SKUs above threshold"
+          : low.map((p) => `${p.name} (${p.stock})`).join(" · ");
+
+      setPosRetail({
+        dailySales,
+        transactionsToday,
+        bestSellerName,
+        bestSellerUnits: bestQty,
+        lowStockSummary,
+        lowStockCount: low.length,
+      });
+    }
+
+    const qTx = query(collection(db, "salesTransactions"), orderBy("createdAt", "desc"), limit(400));
+    const qProd = query(collection(db, "products"), orderBy("name"));
+
+    const unsubTx = onSnapshot(
+      qTx,
+      (snap) => {
+        txs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        recompute();
+      },
+      (err) => console.error("Dashboard POS (transactions):", err)
+    );
+    const unsubProd = onSnapshot(
+      qProd,
+      (snap) => {
+        products = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        recompute();
+      },
+      (err) => console.error("Dashboard POS (products):", err)
+    );
+
+    return () => {
+      unsubTx();
+      unsubProd();
+    };
+  }, []);
+
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
@@ -222,6 +354,77 @@ export default function AdminDashboard() {
           color="emerald"
           status="live-status"
         />
+      </section>
+
+      <section className="mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 mb-4">
+          <div>
+            <h2 className="text-lg font-black text-white tracking-tight flex flex-wrap items-center gap-2">
+              Retail / POS
+              <span className="text-xs font-semibold text-slate-500 normal-case tracking-normal">
+                Walk-in product sales (not booking payments)
+              </span>
+            </h2>
+            <p className="text-xs text-slate-500 mt-1">
+              Pulled live from <span className="text-cyan-400/90">salesTransactions</span> and{" "}
+              <span className="text-cyan-400/90">products</span>.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Link
+              to="/admin/sales-history"
+              className="px-3 py-1.5 rounded-lg border border-slate-700 text-xs font-bold text-slate-300 hover:border-cyan-500/50 hover:text-cyan-400 transition-colors"
+            >
+              Sales history
+            </Link>
+            <Link
+              to="/admin/pos"
+              className="px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-black shadow-[0_0_20px_rgba(34,211,238,0.25)] transition-colors"
+            >
+              Open POS
+            </Link>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <PosStatTile
+            icon="payments"
+            label="Daily sales"
+            value={`₱${posRetail.dailySales.toFixed(2)}`}
+            sub="POS totals completed today"
+            accent="cyan"
+          />
+          <PosStatTile
+            icon="receipt_long"
+            label="Transactions today"
+            value={posRetail.transactionsToday}
+            sub="Completed POS checkouts"
+            accent="emerald"
+          />
+          <PosStatTile
+            icon="trending_up"
+            label="Best seller"
+            value={
+              posRetail.bestSellerName === "—"
+                ? "—"
+                : posRetail.bestSellerName.length > 22
+                  ? `${posRetail.bestSellerName.slice(0, 20)}…`
+                  : posRetail.bestSellerName
+            }
+            sub={
+              posRetail.bestSellerUnits > 0
+                ? `${posRetail.bestSellerUnits} units sold today · top SKU`
+                : "Based on POS volume today"
+            }
+            accent="violet"
+          />
+          <PosStatTile
+            icon="inventory"
+            label="Low stock"
+            value={posRetail.lowStockCount > 0 ? String(posRetail.lowStockCount) : "—"}
+            sub={posRetail.lowStockSummary}
+            accent="amber"
+          />
+        </div>
       </section>
 
       {/* MAIN CONTENT GRID */}

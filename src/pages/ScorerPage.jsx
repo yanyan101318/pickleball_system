@@ -2,7 +2,21 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { subscribeToMatch, updateMatch, updateNextMatch, setChampion, getTournamentInfo } from "../services/tournamentService";
-import { recordSetWin, undoLastSet, setsNeeded, setsTotal, recordPoint, getNextServer } from "../utils/bracketGenerator";
+import {
+  recordSetWin,
+  undoLastSet,
+  setsNeeded,
+  setsTotal,
+  recordPoint,
+  recordRallyPoint,
+  getNextServer,
+} from "../utils/bracketGenerator";
+import {
+  getStoredScoringMode,
+  setStoredScoringMode,
+  getCourtSwap,
+  setCourtSwap,
+} from "../utils/scoringModeStorage";
 import RulesReference from "../components/RulesReference";
 
 // localStorage helpers
@@ -47,8 +61,22 @@ export default function ScorerPage() {
   const [showRules, setShowRules]       = useState(false);
   const undoStackRef                  = useRef([]);
   const [rallyUndoDepth, setRallyUndoDepth] = useState(0);
+  const [scoringMode, setScoringMode]   = useState(() =>
+    getStoredScoringMode(matchId, "traditional"),
+  );
+  const [courtSwapped, setCourtSwapped] = useState(() => getCourtSwap(matchId));
+  const [showCourtChangePopup, setShowCourtChangePopup] = useState(false);
+  const crossedElevenRef = useRef(false);
 
   useEffect(() => { getTournamentInfo(tournamentId).then(setTournamentInfo); }, [tournamentId]);
+
+  useEffect(() => {
+    setScoringMode(getStoredScoringMode(matchId, tournamentInfo?.scoringMode ?? "traditional"));
+  }, [matchId, tournamentInfo?.scoringMode]);
+
+  useEffect(() => {
+    setCourtSwapped(getCourtSwap(matchId));
+  }, [matchId]);
 
   useEffect(() => {
     const unsub = subscribeToMatch(tournamentId, matchId, (data) => {
@@ -58,6 +86,19 @@ export default function ScorerPage() {
   }, [tournamentId, matchId]);
 
   useEffect(() => { saveScore(matchId, localA, localB); }, [matchId, localA, localB]);
+
+  useEffect(() => {
+    if (localA === 0 && localB === 0) crossedElevenRef.current = false;
+  }, [localA, localB]);
+
+  useEffect(() => {
+    if (scoringMode !== "rally") return;
+    const max = Math.max(localA, localB);
+    if (max >= 11 && !crossedElevenRef.current) {
+      crossedElevenRef.current = true;
+      setShowCourtChangePopup(true);
+    }
+  }, [localA, localB, scoringMode]);
 
   function triggerFlash(side, type) {
     if (side === "A") { setFlashA(type); setTimeout(() => setFlashA(null), 300); }
@@ -133,17 +174,23 @@ export default function ScorerPage() {
 
       let newScoreA = localA;
       let newScoreB = localB;
-      if (m.currentGame.servingTeam === scoringTeam) {
+      let result;
+      if (scoringMode === "rally") {
         if (scoringTeam === "A") newScoreA++;
         else newScoreB++;
+        result = recordRallyPoint(m, scoringTeam, newScoreA, newScoreB);
+      } else {
+        if (m.currentGame.servingTeam === scoringTeam) {
+          if (scoringTeam === "A") newScoreA++;
+          else newScoreB++;
+        }
+        result = recordPoint(m, scoringTeam, newScoreA, newScoreB);
       }
-
-      const result = recordPoint(m, scoringTeam, newScoreA, newScoreB);
 
       if (result.gameEnded) {
         setLocalA(newScoreA);
         setLocalB(newScoreB);
-        recordSetWin(m, result.winner, { [m.matchId]: m }, result.scoreA, result.scoreB);
+        recordSetWin(m, result.winner, { [m.matchId]: m }, result.scoreA, result.scoreB, scoringMode);
 
         await updateMatch(tournamentId, m);
 
@@ -287,7 +334,13 @@ export default function ScorerPage() {
           <div className="sp-ball-icon"><PickleballSVG size={22}/></div>
           <div>
             <div className="sp-tournament-name">{tournamentInfo?.name ?? "Tournament"}</div>
-            <div className="sp-match-meta">{matchId} · {formatLabel()}</div>
+            <div className="sp-match-meta">
+              {matchId} · {formatLabel()}
+              {" · "}
+              <span style={{ color: scoringMode === "rally" ? "var(--pickle)" : "inherit" }}>
+                {scoringMode === "rally" ? "Rally scoring (21, win by 2)" : "Traditional scoring"}
+              </span>
+            </div>
           </div>
         </div>
         <div style={{display: "flex", alignItems: "center", gap: "12px"}}>
@@ -334,17 +387,106 @@ export default function ScorerPage() {
       ) : (
         <div className="sp-content">
 
+          {/* ── MODE & COURT ── */}
+          {!winner && (
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "10px",
+                padding: "12px 16px",
+                borderBottom: "1px solid var(--border)",
+                background: "rgba(0,0,0,0.2)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                  Scoring mode
+                </span>
+                <div style={{ display: "inline-flex", borderRadius: "10px", overflow: "hidden", border: "1px solid var(--border)" }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setScoringMode("traditional");
+                      setStoredScoringMode(matchId, "traditional");
+                    }}
+                    disabled={saving}
+                    style={{
+                      padding: "8px 14px",
+                      fontSize: "0.8rem",
+                      fontWeight: 700,
+                      border: "none",
+                      cursor: saving ? "not-allowed" : "pointer",
+                      background: scoringMode === "traditional" ? "rgba(200,230,58,0.2)" : "transparent",
+                      color: "var(--text)",
+                    }}
+                  >
+                    Traditional
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setScoringMode("rally");
+                      setStoredScoringMode(matchId, "rally");
+                    }}
+                    disabled={saving}
+                    style={{
+                      padding: "8px 14px",
+                      fontSize: "0.8rem",
+                      fontWeight: 700,
+                      border: "none",
+                      borderLeft: "1px solid var(--border)",
+                      cursor: saving ? "not-allowed" : "pointer",
+                      background: scoringMode === "rally" ? "rgba(200,230,58,0.2)" : "transparent",
+                      color: "var(--text)",
+                    }}
+                  >
+                    Rally
+                  </button>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setCourtSwapped((v) => {
+                    const n = !v;
+                    setCourtSwap(matchId, n);
+                    return n;
+                  });
+                }}
+                disabled={saving}
+                style={{
+                  padding: "8px 16px",
+                  fontSize: "0.82rem",
+                  fontWeight: 700,
+                  borderRadius: "10px",
+                  border: "1px solid #c8e63a55",
+                  background: "linear-gradient(145deg, #1a2410, #121a0c)",
+                  color: "var(--pickle)",
+                  cursor: saving ? "not-allowed" : "pointer",
+                  boxShadow: "0 0 0 1px rgba(200,230,58,0.08)",
+                }}
+              >
+                ⇄ Change court (visual)
+              </button>
+            </div>
+          )}
+
           {/* ── SCOREBOARD ── */}
           <div className="sp-scoreboard">
 
             {/* Team A */}
-            <div className="sp-team-panel sp-team-a">
+            <div className="sp-team-panel sp-team-a" style={{ order: courtSwapped ? 3 : 1 }}>
               <div className="sp-team-avatar sp-avatar-a">{initials(teamA)}</div>
               <div className="sp-team-name">
                 {teamA || "TBD"}
                 {match.currentGame?.servingTeam === "A" && (
                   <div style={{fontSize: "0.7rem", color: "var(--pickle)", marginTop: "4px", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.5px"}}>
-                    {match.currentGame.firstServer ? "🎾 1ST SERVER" : "🎾 2ND SERVER"}
+                    {scoringMode === "rally"
+                      ? (match.currentGame.servingSide === "right" ? "🎾 RIGHT COURT" : "🎾 LEFT COURT")
+                      : (match.currentGame.firstServer ? "🎾 1ST SERVER" : "🎾 2ND SERVER")}
                   </div>
                 )}
               </div>
@@ -379,7 +521,7 @@ export default function ScorerPage() {
             </div>
 
             {/* Center VS */}
-            <div className="sp-vs-col">
+            <div className="sp-vs-col" style={{ order: 2 }}>
               <div className="sp-vs-text">VS</div>
               <div
                 aria-hidden="true"
@@ -399,13 +541,15 @@ export default function ScorerPage() {
             </div>
 
             {/* Team B */}
-            <div className="sp-team-panel sp-team-b">
+            <div className="sp-team-panel sp-team-b" style={{ order: courtSwapped ? 1 : 3 }}>
               <div className="sp-team-avatar sp-avatar-b">{initials(teamB)}</div>
               <div className="sp-team-name">
                 {teamB || "TBD"}
                 {match.currentGame?.servingTeam === "B" && (
                   <div style={{fontSize: "0.7rem", color: "var(--pickle)", marginTop: "4px", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.5px"}}>
-                    {match.currentGame.firstServer ? "🎾 1ST SERVER" : "🎾 2ND SERVER"}
+                    {scoringMode === "rally"
+                      ? (match.currentGame.servingSide === "right" ? "🎾 RIGHT COURT" : "🎾 LEFT COURT")
+                      : (match.currentGame.firstServer ? "🎾 1ST SERVER" : "🎾 2ND SERVER")}
                   </div>
                 )}
               </div>
@@ -467,7 +611,7 @@ export default function ScorerPage() {
           {match?.currentGame && (
             <div style={{
               padding: "12px 16px", background: "rgba(200,230,58,0.08)", borderTop: "1px solid var(--border)",
-              display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.85rem"
+              display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.85rem", flexWrap: "wrap", gap: "8px"
             }}>
               <div>
                 <span style={{color: "var(--text-muted)"}}>Currently Serving: </span>
@@ -477,7 +621,11 @@ export default function ScorerPage() {
               </div>
               <div>
                 <span style={{color: "var(--text-muted)", fontSize: "0.75rem", textTransform: "uppercase"}}>
-                  {match.currentGame.firstServer ? "1st Server" : "2nd Server"} • {match.currentGame.servingSide === "right" ? "Right" : "Left"} Court
+                  {scoringMode === "rally" ? (
+                    <>Rally · {match.currentGame.servingSide === "right" ? "Right" : "Left"} (team score {match.currentGame.servingTeam === "A" ? localA : localB} = {match.currentGame.servingSide === "right" ? "even" : "odd"})</>
+                  ) : (
+                    <>{match.currentGame.firstServer ? "1st Server" : "2nd Server"} • {match.currentGame.servingSide === "right" ? "Right" : "Left"} Court</>
+                  )}
                 </span>
               </div>
             </div>
@@ -490,6 +638,39 @@ export default function ScorerPage() {
       {toast && (
         <div className={`sp-toast ${toast.type==="error"?"sp-toast-err":"sp-toast-ok"}`}>
           {toast.msg}
+        </div>
+      )}
+
+      {/* ── RALLY: CHANGE ENDS AT 11 ── */}
+      {showCourtChangePopup && scoringMode === "rally" && !winner && (
+        <div
+          className="modal-backdrop"
+          style={{ zIndex: 50 }}
+          onClick={() => setShowCourtChangePopup(false)}
+          role="presentation"
+        >
+          <div
+            className="confirm-box"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: "380px", textAlign: "center" }}
+          >
+            <div style={{ fontSize: "2rem", marginBottom: "8px" }}>↔️</div>
+            <div style={{ fontWeight: 800, fontSize: "1.1rem", marginBottom: "8px", color: "var(--pickle)" }}>
+              Change court now
+            </div>
+            <div style={{ fontSize: "0.9rem", color: "var(--text-muted)", marginBottom: "16px", lineHeight: 1.45 }}>
+              A team has reached 11 points. Switch sides on the physical court, then use{" "}
+              <strong>Change court (visual)</strong> here if your on-screen sides should match.
+            </div>
+            <button
+              type="button"
+              className="confirm-proceed"
+              style={{ width: "100%" }}
+              onClick={() => setShowCourtChangePopup(false)}
+            >
+              OK
+            </button>
+          </div>
         </div>
       )}
 

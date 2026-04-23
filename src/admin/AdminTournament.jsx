@@ -7,6 +7,7 @@ import {
   setChampion, generateTournamentId, subscribeToMatches,
   subscribeToTournamentInfo, getTournamentInfo,
 } from "../services/tournamentService";
+import { getStoredScoringMode } from "../utils/scoringModeStorage";
 
 export default function AdminTournament() {
   const [tournament, setTournament] = useState(null);
@@ -89,12 +90,12 @@ export default function AdminTournament() {
     return rounds;
   }
 
-  async function handleStart(name, teams, format, tournamentFormat) {
+  async function handleStart(name, teams, format, tournamentFormat, scoringMode) {
     setSaving(true);
     try {
       const { rounds, matchMap } = generateBracket(teams, format, tournamentFormat);
       const tId = generateTournamentId(name);
-      await createTournament(tId, name, format, matchMap, tournamentFormat);
+      await createTournament(tId, name, format, matchMap, tournamentFormat, scoringMode);
 
       // Persist tournamentId to localStorage
       localStorage.setItem('adminTournamentId', tId);
@@ -112,7 +113,8 @@ export default function AdminTournament() {
   async function handleSetWin(match, winner, scoreA, scoreB) {
     const m = { ...matchMap[match.matchId] };
     const clonedMap = { ...matchMap, [m.matchId]: m };
-    recordSetWin(m, winner, clonedMap, scoreA, scoreB);
+    const mode = getStoredScoringMode(m.matchId, info?.scoringMode ?? "traditional");
+    recordSetWin(m, winner, clonedMap, scoreA, scoreB, mode);
 
     try {
       // Save to Firestore
@@ -206,6 +208,7 @@ export default function AdminTournament() {
           rounds={tournament.rounds}
           format={tournament.format}
           tournamentId={tournamentId}
+          scoringMode={info?.scoringMode ?? "traditional"}
           onSetWin={handleSetWin}
           onUndo={handleUndo}
           onPersistMatch={handlePersistMatch}

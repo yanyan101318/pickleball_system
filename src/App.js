@@ -20,6 +20,8 @@ import AdminSchedule        from "./admin/AdminSchedule";
 import Book                 from "./components/Book";
 import InventoryPage        from "./admin/InventoryPage";
 import PaddleStackingPage   from "./admin/PaddleStackingPage";
+import PosPage              from "./admin/PosPage";
+import SalesHistoryPage     from "./admin/SalesHistoryPage";
 
 // Tournament public pages (scorer / viewer)
 import ScorerPage from "./pages/ScorerPage";
@@ -63,6 +65,8 @@ export default function App() {
             <Route path="courts"        element={<CourtManager/>}/>
             <Route path="bookings"      element={<BookingManager/>}/>
             <Route path="payments"      element={<PaymentReview/>}/>
+            <Route path="pos"           element={<PosPage/>}/>
+            <Route path="sales-history" element={<SalesHistoryPage/>}/>
             <Route path="tournament"    element={<AdminTournament/>}/>
             <Route path="paddle-stack"  element={<PaddleStackingPage/>}/>
             <Route path="analytics"     element={<Analytics/>}/>

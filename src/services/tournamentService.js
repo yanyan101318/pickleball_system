@@ -5,10 +5,17 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 
-export async function createTournament(tournamentId, name, format, matchMap, tournamentFormat) {
+export async function createTournament(tournamentId, name, format, matchMap, tournamentFormat, scoringMode) {
   const batch = writeBatch(db);
   const infoRef = doc(db, "tournaments", tournamentId);
-  batch.set(infoRef, { name, format, tournamentFormat: tournamentFormat || "single-elimination", createdAt: Date.now(), champion: null });
+  batch.set(infoRef, {
+    name,
+    format,
+    tournamentFormat: tournamentFormat || "single-elimination",
+    scoringMode: scoringMode === "rally" ? "rally" : "traditional",
+    createdAt: Date.now(),
+    champion: null,
+  });
   Object.values(matchMap).forEach(match => {
     const matchRef = doc(db, "tournaments", tournamentId, "matches", match.matchId);
     batch.set(matchRef, sanitizeMatch(match));

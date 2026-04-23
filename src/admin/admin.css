@@ -57,6 +57,26 @@ body {
   box-shadow: 0 0 10px var(--accent-cyan);
 }
 
+@keyframes salesDropdownIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.sales-dropdown-panel {
+  animation: salesDropdownIn 0.2s ease-out;
+}
+
+.sales-dropdown-item:focus-visible {
+  outline: 2px solid rgba(34, 211, 238, 0.45);
+  outline-offset: 1px;
+}
+
 /* Custom scrollbar */
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;

@@ -25,23 +25,36 @@ const NAV_LINKS_AFTER_TOURNAMENT = [
   { to: "/admin/inventory",   label: "Inventory"     },
 ];
 
+const SALES_DROPDOWN_LINKS = [
+  { to: "/admin/payments", label: "Payments" },
+  { to: "/admin/pos", label: "POS" },
+  { to: "/admin/sales-history", label: "Transactions and receipts" },
+];
+
 export default function AdminLayout() {
   const { profile, logout } = useAuth();
   const [showLogout, setShowLogout] = useState(false);
   const [tournamentOpen, setTournamentOpen] = useState(false);
   const [bookingOpen, setBookingOpen] = useState(false);
+  const [salesOpen, setSalesOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const tournamentRef = useRef(null);
   const bookingRef = useRef(null);
+  const salesRef = useRef(null);
   const navigate = useNavigate();
   const location = useLocation();
 
   const tournamentNavActive = TOURNAMENT_SUBLINKS.some((s) => location.pathname === s.to);
   const bookingNavActive = BOOKING_SUBLINKS.some((s) => location.pathname === s.to);
+  const salesNavActive =
+    location.pathname === "/admin/payments" ||
+    location.pathname === "/admin/pos" ||
+    location.pathname === "/admin/sales-history";
 
   useEffect(() => {
     setTournamentOpen(false);
     setBookingOpen(false);
+    setSalesOpen(false);
     setMobileMenuOpen(false);
   }, [location.pathname]);
 
@@ -66,6 +79,9 @@ export default function AdminLayout() {
       }
       if (bookingRef.current && !bookingRef.current.contains(e.target)) {
         setBookingOpen(false);
+      }
+      if (salesRef.current && !salesRef.current.contains(e.target)) {
+        setSalesOpen(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -135,6 +151,7 @@ export default function AdminLayout() {
                   }`}
                   onClick={() => {
                     setTournamentOpen(false);
+                    setSalesOpen(false);
                     setBookingOpen((o) => !o);
                   }}
                   aria-expanded={bookingOpen}
@@ -166,18 +183,63 @@ export default function AdminLayout() {
                   </div>
                 )}
               </div>
-              <NavLink
-                to="/admin/payments"
-                className={({ isActive }) =>
-                  `text-xs font-medium transition-colors ${
-                    isActive
+              <div
+                className="relative"
+                ref={salesRef}
+                onMouseEnter={() => {
+                  if (typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches) {
+                    setBookingOpen(false);
+                    setTournamentOpen(false);
+                    setSalesOpen(true);
+                  }
+                }}
+                onMouseLeave={() => {
+                  if (typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches) {
+                    setSalesOpen(false);
+                  }
+                }}
+              >
+                <button
+                  type="button"
+                  className={`text-xs font-medium transition-colors flex items-center gap-0.5 ${
+                    salesNavActive || salesOpen
                       ? "nav-link-active text-cyan-400"
                       : "nav-link text-slate-400 hover:text-cyan-400"
-                  }`
-                }
-              >
-                Payments
-              </NavLink>
+                  }`}
+                  onClick={() => {
+                    setBookingOpen(false);
+                    setTournamentOpen(false);
+                    setSalesOpen((o) => !o);
+                  }}
+                  aria-expanded={salesOpen}
+                  aria-haspopup="true"
+                >
+                  Sales
+                  <span className="material-symbols-outlined text-[18px] leading-none">
+                    {salesOpen ? "expand_less" : "expand_more"}
+                  </span>
+                </button>
+                {salesOpen && (
+                  <div className="sales-dropdown-panel absolute left-0 top-full mt-1 py-2 px-2 min-w-[240px] max-w-[92vw] rounded-xl border border-slate-700/90 bg-[#151e2d] shadow-[0_12px_40px_rgba(0,0,0,0.45),0_0_1px_rgba(34,211,238,0.35)] z-[60]">
+                    <div className="space-y-0.5">
+                      {SALES_DROPDOWN_LINKS.map((item) => (
+                        <NavLink
+                          key={item.to}
+                          to={item.to}
+                          className={({ isActive }) =>
+                            `sales-dropdown-item block rounded-lg px-3 py-2.5 text-xs font-semibold transition-colors ${
+                              isActive ? "bg-slate-800/90 text-cyan-400" : "text-slate-200 hover:bg-slate-800/70"
+                            }`
+                          }
+                          onClick={() => setSalesOpen(false)}
+                        >
+                          {item.label}
+                        </NavLink>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
               <div className="relative" ref={tournamentRef}>
                 <button
                   type="button"
@@ -188,6 +250,7 @@ export default function AdminLayout() {
                   }`}
                   onClick={() => {
                     setBookingOpen(false);
+                    setSalesOpen(false);
                     setTournamentOpen((o) => !o);
                   }}
                   aria-expanded={tournamentOpen}
@@ -364,20 +427,23 @@ export default function AdminLayout() {
                   </li>
                 ))}
               </ul>
-              <ul className="space-y-0.5 pt-1">
-                <li>
-                  <NavLink
-                    to="/admin/payments"
-                    onClick={() => setMobileMenuOpen(false)}
-                    className={({ isActive }) =>
-                      `block rounded-lg px-3 py-3 text-sm font-medium ${
-                        isActive ? "bg-slate-800 text-cyan-400" : "text-slate-200 hover:bg-slate-800/80"
-                      }`
-                    }
-                  >
-                    Payments
-                  </NavLink>
-                </li>
+              <p className="px-2 pt-4 pb-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Sales</p>
+              <ul className="space-y-0.5">
+                {SALES_DROPDOWN_LINKS.map((item) => (
+                  <li key={item.to}>
+                    <NavLink
+                      to={item.to}
+                      onClick={() => setMobileMenuOpen(false)}
+                      className={({ isActive }) =>
+                        `block rounded-lg px-3 py-3 text-sm font-medium ${
+                          isActive ? "bg-slate-800 text-cyan-400" : "text-slate-200 hover:bg-slate-800/80"
+                        }`
+                      }
+                    >
+                      {item.label}
+                    </NavLink>
+                  </li>
+                ))}
               </ul>
               <p className="px-2 pt-4 pb-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Tournament</p>
               <ul className="space-y-0.5">

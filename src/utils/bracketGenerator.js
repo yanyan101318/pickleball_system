@@ -16,6 +16,64 @@ export function getGameWinner(scoreA, scoreB) {
   return null;
 }
 
+/** Rally scoring: first to 21, win by 2 */
+export const RALLY_WIN_POINTS = 21;
+
+export function isRallyGameWon(scoreA, scoreB) {
+  if (scoreA >= RALLY_WIN_POINTS && scoreB <= scoreA - 2) return true;
+  if (scoreB >= RALLY_WIN_POINTS && scoreA <= scoreB - 2) return true;
+  return false;
+}
+
+export function getRallyGameWinner(scoreA, scoreB) {
+  if (scoreA >= RALLY_WIN_POINTS && scoreB <= scoreA - 2) return "A";
+  if (scoreB >= RALLY_WIN_POINTS && scoreA <= scoreB - 2) return "B";
+  return null;
+}
+
+export function isGameWonForMode(scoreA, scoreB, scoringMode) {
+  return scoringMode === "rally" ? isRallyGameWon(scoreA, scoreB) : isGameWon(scoreA, scoreB);
+}
+
+/** Doubles rally: even team score → right serves, odd → left */
+export function rallyServingSideForTeamScore(teamScore) {
+  return teamScore % 2 === 0 ? "right" : "left";
+}
+
+/**
+ * Rally scoring: every rally won awards a point; side-out when receiving team wins.
+ * Updates match.currentGame for next rally (serve + doubles position).
+ */
+export function recordRallyPoint(match, scoringTeam, newScoreA, newScoreB) {
+  const gameWinner = getRallyGameWinner(newScoreA, newScoreB);
+  if (gameWinner) {
+    return {
+      gameEnded: true,
+      winner: gameWinner,
+      scoreA: newScoreA,
+      scoreB: newScoreB,
+    };
+  }
+
+  const prev = match.currentGame || getNextServer(match);
+  const newServingTeam = scoringTeam;
+  const servingTeamScore = newServingTeam === "A" ? newScoreA : newScoreB;
+  const servingSide = rallyServingSideForTeamScore(servingTeamScore);
+
+  match.currentGame = {
+    servingTeam: newServingTeam,
+    firstServer: servingSide === "right",
+    servingSide,
+    pointsServed: (prev.pointsServed || 0) + 1,
+  };
+
+  return {
+    gameEnded: false,
+    fault: false,
+    serving: match.currentGame,
+  };
+}
+
 // Serving logic for doubles
 export function getNextServer(match) {
   if (!match.currentGame) {
@@ -481,16 +539,19 @@ export function advanceLoser(match, matchMap) {
 
 // winner must always be "A" or "B" — never a team name
 // scoreA and scoreB are the final scores of the game
-export function recordSetWin(match, winner, matchMap, scoreA = 0, scoreB = 0) {
+export function recordSetWin(match, winner, matchMap, scoreA = 0, scoreB = 0, scoringMode = "traditional") {
   if (winner !== "A" && winner !== "B") {
     console.error("recordSetWin: winner must be 'A' or 'B', got:", winner);
     return;
   }
 
-  // Validate game winner based on pickleball scoring (11 points, win by 2)
-  const gameWinner = getGameWinner(scoreA, scoreB);
+  const gameWinner =
+    scoringMode === "rally" ? getRallyGameWinner(scoreA, scoreB) : getGameWinner(scoreA, scoreB);
   if (!gameWinner) {
-    console.error("recordSetWin: Invalid game score. Score must be 11+ with 2-point lead.");
+    console.error(
+      "recordSetWin: Invalid game score.",
+      scoringMode === "rally" ? "Rally: need 21+ with 2-point lead." : "Traditional: need 11+ with 2-point lead.",
+    );
     return;
   }
 

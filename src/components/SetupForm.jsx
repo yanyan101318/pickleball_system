@@ -139,6 +139,7 @@ export default function SetupForm({ onStart }) {
   const [tournamentName, setTournamentName] = useState("");
   const [randomize, setRandomize] = useState(false);
   const [tournamentFormat, setTournamentFormat] = useState("single-elimination");
+  const [scoringMode, setScoringMode] = useState("traditional");
   const [error, setError]         = useState("");
   const [mounted, setMounted]     = useState(false);
 
@@ -155,7 +156,7 @@ export default function SetupForm({ onStart }) {
     const unique = new Set(teams.map(t => t.toLowerCase()));
     if (unique.size !== teams.length) { setError("Duplicate team names found."); return; }
     setError("");
-    onStart(tournamentName || "My Tournament", randomize ? shuffleArray(teams) : teams, format, tournamentFormat);
+    onStart(tournamentName || "My Tournament", randomize ? shuffleArray(teams) : teams, format, tournamentFormat, scoringMode);
   }
 
   return (
@@ -270,6 +271,29 @@ export default function SetupForm({ onStart }) {
                     <span>🔄</span> Round Robin
                   </button>
                 </div>
+              </div>
+
+              <div className="ls-field">
+                <label className="ls-label">Scoring</label>
+                <div className="ls-format-row">
+                  <button
+                    type="button"
+                    className={`ls-fmt-type-btn ${scoringMode === "traditional" ? "active" : ""}`}
+                    onClick={() => setScoringMode("traditional")}
+                  >
+                    <span>🎯</span> Traditional Scoring
+                  </button>
+                  <button
+                    type="button"
+                    className={`ls-fmt-type-btn ${scoringMode === "rally" ? "active" : ""}`}
+                    onClick={() => setScoringMode("rally")}
+                  >
+                    <span>⚡</span> Rally Scoring
+                  </button>
+                </div>
+                <p className="ls-hint" style={{ marginTop: "8px", opacity: 0.85 }}>
+                  Rally: point every rally · first to 21, win by 2 · change ends at 11
+                </p>
               </div>
             </div>
           </div>
