@@ -12,6 +12,7 @@ const NAV_LINKS = [
 const BOOKING_SUBLINKS = [
   { to: "/admin/bookings",    label: "Bookings"      },
   { to: "/admin/new-booking", label: "New booking"  },
+  { to: "/admin/crm",        label: "CRM"           },
 ];
 
 const TOURNAMENT_SUBLINKS = [

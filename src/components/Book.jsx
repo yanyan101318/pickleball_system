@@ -15,10 +15,22 @@ import {
 import { Link } from "react-router-dom";
 import {
   Calendar, Clock, Users, ChevronRight, Check, Upload,
-  Smartphone, AlertCircle, Package, User, FileText, X
+  Smartphone, AlertCircle, Package, User, FileText, X, Banknote,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { format, addDays } from "date-fns";
+import { roundMoney, parseCashAmount, parseAmountPaid } from "../lib/bookingMoney";
+import { TIME_SLOTS } from "../lib/bookingSlots";
+import {
+  PLAN_FULL,
+  PLAN_PARTIAL,
+  PLAN_LATER,
+  resolveAmountPaid,
+  resolveRemaining,
+  resolveCustomerPayStatus,
+} from "../lib/bookingPayment";
+import { upsertCustomerAfterBooking } from "../lib/crm";
+import BookingReceipt from "./BookingReceipt";
 
 function deriveCourtKind(c) {
   const joined = (c.amenities || [])
@@ -28,12 +40,6 @@ function deriveCourtKind(c) {
   if (joined.includes("outdoor")) return "Outdoor";
   return "Court";
 }
-
-const TIME_SLOTS = [
-  "06:00 AM", "07:00 AM", "08:00 AM", "09:00 AM", "10:00 AM", "11:00 AM",
-  "12:00 PM", "01:00 PM", "02:00 PM", "03:00 PM", "04:00 PM", "05:00 PM",
-  "06:00 PM", "07:00 PM", "08:00 PM", "09:00 PM",
-];
 
 const DURATIONS = [1, 1.5, 2, 2.5, 3, 4];
 
@@ -48,6 +54,9 @@ const PROMOS = [
   { code: "NEWUSER", discount: 0.15, label: "15% off for new users" },
   { code: "MEMBER20", discount: 0.2, label: "20% member discount" },
 ];
+
+const PAYMENT_GCASH = "gcash";
+const PAYMENT_CASH = "cash";
 
 export default function Book() {
   const { user, profile } = useAuth();
@@ -66,8 +75,10 @@ export default function Book() {
   const [appliedPromo, setAppliedPromo] = useState(null);
   const [paymentImg, setPaymentImg] = useState(null);
   const [paymentImgUrl, setPaymentImgUrl] = useState("");
+  const [cashReceivedInput, setCashReceivedInput] = useState("");
+  const [amountPaidInput, setAmountPaidInput] = useState("");
+  const [receiptSnapshot, setReceiptSnapshot] = useState(null);
   const [submitting, setSubmitting] = useState(false);
-  const [bookingId, setBookingId] = useState(null);
 
   const [form, setForm] = useState({
     courtId: courtParam || "",
@@ -78,7 +89,10 @@ export default function Book() {
     equipment: [],
     notes: "",
     playerName: "",
-    paymentMethod: "gcash",
+    contactNumber: "",
+    email: "",
+    paymentMethod: PAYMENT_GCASH,
+    paymentPlan: PLAN_FULL,
   });
 
   const activeCourts = useMemo(
@@ -165,6 +179,41 @@ export default function Book() {
   const discount = appliedPromo ? subtotal * appliedPromo.discount : 0;
   const total = subtotal - discount;
 
+  const partialPaidNum = useMemo(
+    () => parseAmountPaid(amountPaidInput),
+    [amountPaidInput]
+  );
+  const amountPaidNow = useMemo(
+    () => resolveAmountPaid(form.paymentPlan, total, partialPaidNum),
+    [form.paymentPlan, total, partialPaidNum]
+  );
+  const remainingBalance = useMemo(
+    () => resolveRemaining(total, amountPaidNow),
+    [total, amountPaidNow]
+  );
+  const customerPaymentStatus = useMemo(
+    () => resolveCustomerPayStatus(form.paymentPlan, total, amountPaidNow),
+    [form.paymentPlan, total, amountPaidNow]
+  );
+  const cashDueNow = useMemo(() => {
+    if (form.paymentPlan === PLAN_LATER) return 0;
+    return roundMoney(amountPaidNow);
+  }, [form.paymentPlan, amountPaidNow]);
+  const cashReceivedNum = useMemo(
+    () => parseCashAmount(cashReceivedInput),
+    [cashReceivedInput]
+  );
+  const cashChangeUi = useMemo(() => {
+    if (form.paymentMethod !== PAYMENT_CASH || form.paymentPlan === PLAN_LATER) {
+      return { text: "—", variant: "muted" };
+    }
+    const raw = String(cashReceivedInput ?? "").trim();
+    if (raw === "") return { text: "—", variant: "muted" };
+    if (!Number.isFinite(cashReceivedNum)) return { text: "—", variant: "muted" };
+    if (cashReceivedNum < cashDueNow) return { text: "Insufficient", variant: "danger" };
+    return { text: `₱${roundMoney(cashReceivedNum - cashDueNow).toFixed(2)}`, variant: "ok" };
+  }, [form.paymentMethod, form.paymentPlan, cashReceivedInput, cashReceivedNum, cashDueNow]);
+
   const toggleEquipment = (id) => {
     setForm((f) => ({
       ...f,
@@ -186,24 +235,91 @@ export default function Book() {
     setPaymentImgUrl(URL.createObjectURL(file));
   };
 
+  const selectPaymentMethod = (method) => {
+    setForm((f) => ({ ...f, paymentMethod: method }));
+    if (method === PAYMENT_CASH) {
+      setPaymentImg(null);
+      setPaymentImgUrl("");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    } else {
+      setCashReceivedInput("");
+    }
+  };
+
+  const selectPaymentPlan = (plan) => {
+    setForm((f) => ({ ...f, paymentPlan: plan }));
+    if (plan !== PLAN_PARTIAL) setAmountPaidInput("");
+    if (plan === PLAN_LATER) {
+      setPaymentImg(null);
+      setPaymentImgUrl("");
+      setCashReceivedInput("");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
   const handleSubmit = async () => {
     if (!court) return toast.error("Please select a court");
     if (!form.timeSlot) return toast.error("Please select a time slot");
     if (!form.playerName) return toast.error("Player name is required");
+    if (!String(form.contactNumber ?? "").trim()) {
+      toast.error("Contact number is required");
+      return;
+    }
+
+    const paidNow = resolveAmountPaid(form.paymentPlan, total, partialPaidNum);
+    if (form.paymentPlan === PLAN_PARTIAL) {
+      if (!Number.isFinite(partialPaidNum) || partialPaidNum <= 0) {
+        toast.error("Enter a valid down payment amount");
+        return;
+      }
+      if (partialPaidNum >= total) {
+        toast.error("Down payment must be less than the total");
+        return;
+      }
+    }
+
+    const needGcashProof = form.paymentMethod === PAYMENT_GCASH && paidNow > 0;
+    if (needGcashProof && !paymentImg) {
+      toast.error("Please upload your GCash receipt");
+      return;
+    }
+
+    if (form.paymentMethod === PAYMENT_CASH && form.paymentPlan !== PLAN_LATER) {
+      const raw = String(cashReceivedInput ?? "").trim();
+      if (raw === "") return toast.error("Please enter cash received");
+      if (!Number.isFinite(cashReceivedNum)) return toast.error("Enter a valid cash amount");
+      if (cashReceivedNum < cashDueNow) {
+        return toast.error("Cash received is less than the amount due now");
+      }
+    }
+
     setSubmitting(true);
 
     try {
-      // Upload proof image to base64 or skip for demo (real app: use Firebase Storage)
-      let imageUrl = "";
-      if (paymentImg) {
-        imageUrl = await new Promise((resolve) => {
+      let receiptUrl = null;
+      if (needGcashProof && paymentImg) {
+        receiptUrl = await new Promise((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = (e) => resolve(e.target.result);
+          reader.onerror = () => reject(new Error("Could not read receipt file"));
           reader.readAsDataURL(paymentImg);
         });
       }
 
-      const bookingData = {
+      const amountPaidRounded = roundMoney(paidNow);
+      const remainingRounded = resolveRemaining(total, amountPaidRounded);
+      const payStatus = resolveCustomerPayStatus(form.paymentPlan, total, amountPaidRounded);
+
+      const cashReceivedRounded =
+        form.paymentMethod === PAYMENT_CASH && form.paymentPlan !== PLAN_LATER
+          ? roundMoney(cashReceivedNum)
+          : null;
+      const changeRounded =
+        form.paymentMethod === PAYMENT_CASH && form.paymentPlan !== PLAN_LATER
+          ? roundMoney(cashReceivedNum - cashDueNow)
+          : null;
+
+      const bookingBase = {
         courtId: form.courtId,
         courtName: court.name,
         date: form.date,
@@ -213,15 +329,34 @@ export default function Book() {
         equipment: form.equipment,
         notes: form.notes,
         playerName: form.playerName,
+        contactNumber: String(form.contactNumber).trim(),
+        email: String(form.email ?? "").trim() || null,
         userId: user.uid,
         status: "Pending",
         createdAt: serverTimestamp(),
         promoCode: appliedPromo?.code || null,
+        paymentMethod: form.paymentMethod,
+        paymentPlan: form.paymentPlan,
+        hourlyRate: roundMoney(court.price),
+        totalAmount: roundMoney(total),
+        amountPaid: amountPaidRounded,
+        remainingBalance: remainingRounded,
+        customerPaymentStatus: payStatus,
       };
+
+      const bookingData =
+        form.paymentMethod === PAYMENT_GCASH
+          ? { ...bookingBase, receiptUrl: receiptUrl || null }
+          : {
+              ...bookingBase,
+              receiptUrl: null,
+              cashReceived: cashReceivedRounded,
+              change: changeRounded,
+            };
 
       const bookingRef = await addDoc(collection(db, "bookings"), bookingData);
 
-      await addDoc(collection(db, "payments"), {
+      const paymentBase = {
         bookingId: bookingRef.id,
         userId: user.uid,
         name: form.playerName,
@@ -229,16 +364,61 @@ export default function Book() {
         courtName: court.name,
         date: form.date,
         timeSlot: form.timeSlot,
-        amount: total,
+        amount: roundMoney(total),
+        totalAmount: roundMoney(total),
+        amountPaid: amountPaidRounded,
+        remainingBalance: remainingRounded,
+        paymentPlan: form.paymentPlan,
+        customerPaymentStatus: payStatus,
         method: form.paymentMethod,
         paymentStatus: "Pending",
-        paymentImageUrl: imageUrl,
         promoCode: appliedPromo?.code || null,
         discount,
         createdAt: serverTimestamp(),
+      };
+
+      const paymentData =
+        form.paymentMethod === PAYMENT_GCASH
+          ? { ...paymentBase, paymentImageUrl: receiptUrl || null }
+          : {
+              ...paymentBase,
+              paymentImageUrl: null,
+              cashReceived: cashReceivedRounded,
+              change: changeRounded,
+            };
+
+      await addDoc(collection(db, "payments"), paymentData);
+
+      await upsertCustomerAfterBooking(db, {
+        userId: user.uid,
+        fullName: form.playerName,
+        contactNumber: String(form.contactNumber).trim(),
+        email: String(form.email ?? "").trim() || null,
+        amountApplied: amountPaidRounded,
       });
 
-      setBookingId(bookingRef.id);
+      const paymentMethodLabel = form.paymentMethod === PAYMENT_CASH ? "Cash" : "GCash";
+      const paymentPlanLabel =
+        form.paymentPlan === PLAN_FULL ? "Full payment" :
+        form.paymentPlan === PLAN_PARTIAL ? "Down payment" : "Pay later";
+
+      setReceiptSnapshot({
+        transactionId: bookingRef.id,
+        date: form.date,
+        timeSlot: form.timeSlot,
+        courtName: court.name,
+        duration: form.duration,
+        playerName: form.playerName,
+        paymentMethodLabel,
+        paymentPlanLabel,
+        totalAmount: roundMoney(total),
+        amountPaid: amountPaidRounded,
+        remainingBalance: remainingRounded,
+        change:
+          form.paymentMethod === PAYMENT_CASH && form.paymentPlan !== PLAN_LATER ? changeRounded : null,
+        customerPayStatus: payStatus,
+      });
+
       setStep(4);
       toast.success("Booking submitted!");
     } catch (err) {
@@ -252,64 +432,57 @@ export default function Book() {
   const minDate = format(addDays(new Date(), 1), "yyyy-MM-dd");
   const maxDate = format(addDays(new Date(), 30), "yyyy-MM-dd");
 
-  if (step === 4) {
+  if (step === 4 && receiptSnapshot) {
     return (
       <div
         className={
           adminMode
             ? "hero-bg flex items-center justify-center px-4 py-10 rounded-2xl border border-slate-800"
-            : "min-h-screen hero-bg flex items-center justify-center px-4 pt-20"
+            : "min-h-screen hero-bg flex items-center justify-center px-4 pt-20 pb-12"
         }
       >
-        <div className="max-w-md w-full text-center">
-          <div className="card p-10">
-            <div className="w-20 h-20 bg-green-500/20 border-2 border-green-500 rounded-full flex items-center justify-center mx-auto mb-6 glow-green">
-              <Check size={36} className="text-green-400" />
+        <div className="max-w-lg w-full space-y-6">
+          <div className="card p-6 sm:p-8 text-center">
+            <div className="w-16 h-16 bg-green-500/20 border-2 border-green-500 rounded-full flex items-center justify-center mx-auto mb-4 glow-green">
+              <Check size={30} className="text-green-400" />
             </div>
-            <h2 className="font-display text-3xl tracking-wider text-white mb-2">BOOKING SUBMITTED!</h2>
-            <p className="text-slate-400 text-sm mb-6">
-              Your booking is <strong className="text-yellow-400">pending approval</strong>. We'll notify you once confirmed.
-            </p>
-            <div className="bg-slate-800 rounded-xl p-4 text-left space-y-2 mb-6">
-              <div className="flex justify-between text-sm">
-                <span className="text-slate-500">Court</span>
-                <span className="text-white">{court?.name ?? "—"}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-slate-500">Date</span>
-                <span className="text-white">{form.date}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-slate-500">Time</span>
-                <span className="text-white">{form.timeSlot}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-slate-500">Total Paid</span>
-                <span className="text-green-400 font-semibold">₱{total.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-slate-500">Booking ID</span>
-                <span className="text-white text-xs font-mono">{bookingId?.slice(0, 12)}...</span>
-              </div>
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => navigate(adminMode ? "/admin/bookings" : "/bookings")}
-                className="btn-primary flex-1 text-sm py-3"
-              >
-                {adminMode ? "View all bookings" : "View My Bookings"}
-              </button>
-              <button
-                onClick={() => {
-                  setStep(1);
-                  setBookingId(null);
-                  if (adminMode) setForm((f) => ({ ...f, playerName: "" }));
-                }}
-                className="btn-secondary flex-1 text-sm py-3"
-              >
-                Book Another
-              </button>
-            </div>
+            <h2 className="font-display text-2xl sm:text-3xl tracking-wider text-white mb-2">BOOKING SUBMITTED</h2>
+            <p className="text-slate-400 text-sm">Pending staff approval. Save your receipt below.</p>
+          </div>
+          <div className="card p-6 sm:p-8">
+            <BookingReceipt receipt={receiptSnapshot} />
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              type="button"
+              onClick={() => navigate(adminMode ? "/admin/bookings" : "/bookings")}
+              className="btn-primary flex-1 text-sm py-3"
+            >
+              {adminMode ? "View all bookings" : "View My Bookings"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setStep(1);
+                setReceiptSnapshot(null);
+                setPaymentImg(null);
+                setPaymentImgUrl("");
+                setCashReceivedInput("");
+                setAmountPaidInput("");
+                if (fileInputRef.current) fileInputRef.current.value = "";
+                setForm((f) => ({
+                  ...f,
+                  paymentMethod: PAYMENT_GCASH,
+                  paymentPlan: PLAN_FULL,
+                  contactNumber: "",
+                  email: "",
+                  ...(adminMode ? { playerName: "" } : {}),
+                }));
+              }}
+              className="btn-secondary flex-1 text-sm py-3"
+            >
+              Book another
+            </button>
           </div>
         </div>
       </div>
@@ -452,6 +625,26 @@ export default function Book() {
                         ))}
                       </select>
                     </div>
+                    <div className="sm:col-span-2">
+                      <label className="label">Contact number *</label>
+                      <input
+                        type="tel"
+                        className="input-field"
+                        placeholder="09XX XXX XXXX"
+                        value={form.contactNumber}
+                        onChange={(e) => setForm({ ...form, contactNumber: e.target.value })}
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="label">Email (optional)</label>
+                      <input
+                        type="email"
+                        className="input-field"
+                        placeholder="you@example.com"
+                        value={form.email}
+                        onChange={(e) => setForm({ ...form, email: e.target.value })}
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -586,57 +779,207 @@ export default function Book() {
             {/* Step 3 - Payment */}
             {step === 3 && (
               <div className="card p-6">
-                <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
-                  <Smartphone size={18} className="text-green-400" /> GCash Payment
+                <h3 className="text-white font-semibold mb-1 flex items-center gap-2">
+                  <Smartphone size={18} className="text-green-400" /> Payment
                 </h3>
-                <div className="bg-green-500/5 border border-green-500/20 rounded-xl p-5 mb-5">
-                  <div className="flex items-start gap-3">
-                    <AlertCircle size={18} className="text-green-400 mt-0.5 shrink-0" />
-                    <div className="text-sm">
-                      <p className="text-white font-medium mb-1">Payment Instructions</p>
-                      <ol className="text-slate-400 space-y-1 list-decimal list-inside">
-                        <li>Open GCash on your phone</li>
-                        <li>Send <strong className="text-green-400">₱{total.toFixed(2)}</strong> to: <strong className="text-white">09XX-XXX-XXXX</strong></li>
-                        <li>Account Name: <strong className="text-white">PickleZone Inc.</strong></li>
-                        <li>Take a screenshot of the receipt</li>
-                        <li>Upload the screenshot below</li>
-                      </ol>
-                    </div>
-                  </div>
+                <p className="text-slate-500 text-sm mb-5">Plan, method, and proof</p>
+
+                <label className="label">Payment plan</label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-6">
+                  {[
+                    { id: PLAN_FULL, label: "Full payment" },
+                    { id: PLAN_PARTIAL, label: "Down payment" },
+                    { id: PLAN_LATER, label: "Pay later" },
+                  ].map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => selectPaymentPlan(p.id)}
+                      className={`rounded-xl border py-3 px-2 text-xs font-semibold transition-all ${
+                        form.paymentPlan === p.id
+                          ? "border-cyan-500 bg-cyan-500/15 text-cyan-300"
+                          : "border-slate-700 bg-slate-800/80 text-slate-400 hover:border-slate-600"
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
                 </div>
 
-                <label className="label">Upload GCash Receipt *</label>
+                {form.paymentPlan === PLAN_PARTIAL && (
+                  <div className="mb-6">
+                    <label className="label">Amount paying now *</label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="input-field"
+                      placeholder="0.00"
+                      value={amountPaidInput}
+                      onChange={(e) => setAmountPaidInput(e.target.value)}
+                    />
+                    <p className="text-slate-500 text-xs mt-1">
+                      Balance after: <strong className="text-amber-400">₱{remainingBalance.toFixed(2)}</strong>
+                    </p>
+                  </div>
+                )}
+
+                <label className="label">Payment method</label>
+                <div className="grid grid-cols-2 gap-3 mb-6">
+                  <button
+                    type="button"
+                    onClick={() => selectPaymentMethod(PAYMENT_GCASH)}
+                    className={`flex items-center justify-center gap-2 rounded-xl border py-3.5 px-3 text-sm font-semibold min-h-[48px] transition-all ${
+                      form.paymentMethod === PAYMENT_GCASH
+                        ? "border-green-500 bg-green-500/15 text-green-400"
+                        : "border-slate-700 bg-slate-800/80 text-slate-400"
+                    }`}
+                  >
+                    <Smartphone size={18} /> GCash
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => selectPaymentMethod(PAYMENT_CASH)}
+                    className={`flex items-center justify-center gap-2 rounded-xl border py-3.5 px-3 text-sm font-semibold min-h-[48px] transition-all ${
+                      form.paymentMethod === PAYMENT_CASH
+                        ? "border-amber-500 bg-amber-500/15 text-amber-400"
+                        : "border-slate-700 bg-slate-800/80 text-slate-400"
+                    }`}
+                  >
+                    <Banknote size={18} /> Cash
+                  </button>
+                </div>
+
                 <div
-                  onClick={() => fileInputRef.current?.click()}
-                  className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${
-                    paymentImgUrl ? "border-green-500 bg-green-500/5" : "border-slate-700 hover:border-slate-500"
+                  className={`transition-[max-height,opacity] duration-300 overflow-hidden ${
+                    form.paymentMethod === PAYMENT_GCASH ? "max-h-[2000px] opacity-100" : "max-h-0 opacity-0 pointer-events-none"
                   }`}
+                  aria-hidden={form.paymentMethod !== PAYMENT_GCASH}
                 >
-                  {paymentImgUrl ? (
-                    <div>
-                      <img src={paymentImgUrl} alt="Receipt" className="max-h-40 mx-auto rounded-lg mb-3 object-contain" />
-                      <p className="text-green-400 text-sm font-medium flex items-center justify-center gap-1">
-                        <Check size={14} /> Receipt uploaded
-                      </p>
-                    </div>
-                  ) : (
-                    <div>
-                      <Upload size={32} className="text-slate-600 mx-auto mb-2" />
-                      <p className="text-slate-400 text-sm">Click to upload GCash screenshot</p>
-                      <p className="text-slate-600 text-xs mt-1">PNG, JPG up to 5MB</p>
+                  {form.paymentMethod === PAYMENT_GCASH && (
+                    <>
+                      <div className="bg-green-500/5 border border-green-500/20 rounded-xl p-5 mb-5">
+                        <div className="flex items-start gap-3">
+                          <AlertCircle size={18} className="text-green-400 mt-0.5 shrink-0" />
+                          <div className="text-sm">
+                            <p className="text-white font-medium mb-1">GCash instructions</p>
+                            {amountPaidNow <= 0 ? (
+                              <p className="text-slate-400">No GCash transfer needed for pay later.</p>
+                            ) : (
+                              <ol className="text-slate-400 space-y-1 list-decimal list-inside">
+                                <li>Open GCash on your phone</li>
+                                <li>
+                                  Send <strong className="text-green-400">₱{amountPaidNow.toFixed(2)}</strong> to:{" "}
+                                  <strong className="text-white">09XX-XXX-XXXX</strong>
+                                </li>
+                                <li>Account Name: <strong className="text-white">PickleZone Inc.</strong></li>
+                                <li>Screenshot the receipt and upload below</li>
+                              </ol>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      {amountPaidNow > 0 && (
+                        <>
+                          <label className="label">Upload GCash receipt *</label>
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                fileInputRef.current?.click();
+                              }
+                            }}
+                            onClick={() => fileInputRef.current?.click()}
+                            className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer ${
+                              paymentImgUrl ? "border-green-500 bg-green-500/5" : "border-slate-700 hover:border-slate-500"
+                            }`}
+                          >
+                            {paymentImgUrl ? (
+                              <div>
+                                <img src={paymentImgUrl} alt="Receipt" className="max-h-40 mx-auto rounded-lg mb-3 object-contain" />
+                                <p className="text-green-400 text-sm font-medium flex items-center justify-center gap-1">
+                                  <Check size={14} /> Receipt uploaded
+                                </p>
+                              </div>
+                            ) : (
+                              <div>
+                                <Upload size={32} className="text-slate-600 mx-auto mb-2" />
+                                <p className="text-slate-400 text-sm">Upload GCash screenshot</p>
+                              </div>
+                            )}
+                            <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+                          </div>
+                          {paymentImgUrl && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPaymentImg(null);
+                                setPaymentImgUrl("");
+                                if (fileInputRef.current) fileInputRef.current.value = "";
+                              }}
+                              className="mt-2 text-red-400 hover:text-red-300 text-xs flex items-center gap-1"
+                            >
+                              <X size={12} /> Remove image
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                <div
+                  className={`transition-[max-height,opacity] duration-300 overflow-hidden ${
+                    form.paymentMethod === PAYMENT_CASH ? "max-h-[2000px] opacity-100" : "max-h-0 opacity-0 pointer-events-none"
+                  }`}
+                  aria-hidden={form.paymentMethod !== PAYMENT_CASH}
+                >
+                  {form.paymentMethod === PAYMENT_CASH && (
+                    <div className="space-y-5">
+                      <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-5">
+                        <p className="text-white font-medium text-sm mb-1">Cash</p>
+                        <p className="text-slate-300 text-sm">
+                          {form.paymentPlan === PLAN_LATER
+                            ? "You will pay in cash at the facility before play."
+                            : `Bring cash — amount due now: ₱${cashDueNow.toFixed(2)} (total booking ₱${total.toFixed(2)})`}
+                        </p>
+                      </div>
+                      {form.paymentPlan !== PLAN_LATER && (
+                        <div className="grid sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="label">Cash received *</label>
+                            <div className="relative">
+                              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm"></span>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                className="input-field pl-8"
+                                placeholder="0.00"
+                                value={cashReceivedInput}
+                                onChange={(e) => setCashReceivedInput(e.target.value)}
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="label">Change</label>
+                            <div
+                              className={`input-field flex items-center min-h-[42px] cursor-default ${
+                                cashChangeUi.variant === "danger"
+                                  ? "text-red-400 border-red-500/30 bg-red-500/5"
+                                  : cashChangeUi.variant === "ok"
+                                    ? "text-emerald-400"
+                                    : "text-slate-500"
+                              }`}
+                            >
+                              {cashChangeUi.text}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
-                  <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
                 </div>
-
-                {paymentImgUrl && (
-                  <button
-                    onClick={() => { setPaymentImg(null); setPaymentImgUrl(""); }}
-                    className="mt-2 text-red-400 hover:text-red-300 text-xs flex items-center gap-1"
-                  >
-                    <X size={12} /> Remove image
-                  </button>
-                )}
               </div>
             )}
 
@@ -652,6 +995,9 @@ export default function Book() {
                   onClick={() => {
                     if (step === 1 && !form.timeSlot) return toast.error("Please select a time slot");
                     if (step === 1 && !form.playerName) return toast.error("Player name is required");
+                    if (step === 1 && !String(form.contactNumber ?? "").trim()) {
+                      return toast.error("Contact number is required");
+                    }
                     setStep(step + 1);
                   }}
                   className="btn-primary flex-1 py-3 flex items-center justify-center gap-2"
@@ -765,9 +1111,29 @@ export default function Book() {
                 </div>
               </div>
 
+              {step === 3 && (
+                <div className="mt-4 space-y-2 text-xs border-t border-slate-800 pt-4">
+                  <div className="flex justify-between text-slate-400">
+                    <span>Paying now</span>
+                    <span className="text-white">₱{amountPaidNow.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Balance</span>
+                    <span className="text-amber-400">₱{remainingBalance.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Status</span>
+                    <span className="text-slate-200 capitalize">{customerPaymentStatus}</span>
+                  </div>
+                </div>
+              )}
               <div className="mt-4 p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl">
                 <p className="text-blue-400 text-xs">
-                  💡 Booking is pending until payment is confirmed by our team (usually within 30 minutes).
+                  {form.paymentPlan === PLAN_LATER
+                    ? "💡 Pay later: settle at the desk before your slot."
+                    : form.paymentMethod === PAYMENT_CASH
+                      ? "💡 Cash: pay at facility; booking stays pending until approved."
+                      : "💡 GCash: pending until staff confirms your transfer."}
                 </p>
               </div>
             </div>

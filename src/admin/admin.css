@@ -313,6 +313,11 @@ body {
   z-index: 200; display: flex; align-items: center; justify-content: center;
   padding: 1rem; backdrop-filter: blur(4px);
 }
+.ad-modal-wide {
+  max-width: 640px;
+  width: 96%;
+}
+
 .ad-modal {
   background: var(--ad-surface); border-radius: 16px;
   border: 1px solid var(--ad-border); width: 100%; max-width: 520px;

@@ -107,6 +107,21 @@ export default function Analytics() {
           }
         });
 
+        const monthlyRevenue = {};
+        const bookingPaySplit = { GCash: 0, Cash: 0, Other: 0 };
+        bookings.forEach((b) => {
+          const ts = b.createdAt?.toDate?.();
+          if (ts) {
+            const km = format(ts, "yyyy-MM");
+            monthlyRevenue[km] =
+              (monthlyRevenue[km] || 0) + (Number(b.totalAmount) || Number(b.amountPaid) || 0);
+          }
+          const pm = String(b.paymentMethod || "").toLowerCase();
+          if (pm === "gcash") bookingPaySplit.GCash += 1;
+          else if (pm === "cash") bookingPaySplit.Cash += 1;
+          else if (pm) bookingPaySplit.Other += 1;
+        });
+
         setData({
           bookings,
           payments,
@@ -117,6 +132,8 @@ export default function Analytics() {
           revenue,
           methods,
           bPerDay,
+          monthlyRevenue,
+          bookingPaySplit,
         });
         setFetchedAt(new Date());
       } catch (err) {
@@ -151,6 +168,26 @@ export default function Analytics() {
     if (m <= 0) return new Set();
     return new Set(Object.entries(vals).filter(([, v]) => v === m).map(([k]) => k));
   }, [data]);
+
+  const monthlyEntries = useMemo(() => {
+    const entries = Object.entries(data?.monthlyRevenue ?? {}).sort((a, b) => a[0].localeCompare(b[0]));
+    return entries.slice(-8);
+  }, [data]);
+
+  const maxMonthly = useMemo(
+    () => Math.max(...monthlyEntries.map(([, v]) => v), 1),
+    [monthlyEntries]
+  );
+
+  const bookingPayEntries = useMemo(() => {
+    const o = data?.bookingPaySplit ?? {};
+    return Object.entries(o).filter(([, v]) => v > 0);
+  }, [data]);
+
+  const maxBookingPay = useMemo(
+    () => Math.max(...bookingPayEntries.map(([, v]) => v), 1),
+    [bookingPayEntries]
+  );
 
   if (loading) {
     return (
@@ -337,9 +374,9 @@ export default function Analytics() {
                 <span className="material-symbols-outlined" aria-hidden>
                   account_balance_wallet
                 </span>
-                Payment methods
+                Payment methods (records)
               </h3>
-              <p className="an-card-desc">Share of recorded payments by method (all statuses).</p>
+              <p className="an-card-desc">Share of payment collection rows by method.</p>
             </div>
           </div>
           <div className="an-methods">
@@ -369,6 +406,58 @@ export default function Analytics() {
                 </div>
               );
             })}
+          </div>
+        </div>
+
+        <div className="ad-card">
+          <div className="an-card-head">
+            <div className="an-card-head-text">
+              <h3 className="an-card-title">
+                <span className="material-symbols-outlined" aria-hidden>
+                  calendar_month
+                </span>
+                Monthly booking revenue
+              </h3>
+              <p className="an-card-desc">Sum of booking totals by calendar month (from booking records).</p>
+            </div>
+          </div>
+          <div className="an-bars">
+            {monthlyEntries.length === 0 && <div className="an-empty-soft">No dated bookings yet.</div>}
+            {monthlyEntries.map(([label, value], i) => (
+              <MiniBar
+                key={label}
+                label={label}
+                value={Math.round(value)}
+                max={maxMonthly}
+                styleFill={BAR_ACCENT[i % BAR_ACCENT.length]}
+              />
+            ))}
+          </div>
+        </div>
+
+        <div className="ad-card">
+          <div className="an-card-head">
+            <div className="an-card-head-text">
+              <h3 className="an-card-title">
+                <span className="material-symbols-outlined" aria-hidden>
+                  compare_arrows
+                </span>
+                Cash vs GCash (bookings)
+              </h3>
+              <p className="an-card-desc">How customers chose to pay on court bookings.</p>
+            </div>
+          </div>
+          <div className="an-bars">
+            {bookingPayEntries.length === 0 && <div className="an-empty-soft">No method on bookings yet.</div>}
+            {bookingPayEntries.map(([label, value], i) => (
+              <MiniBar
+                key={label}
+                label={label}
+                value={value}
+                max={maxBookingPay}
+                styleFill={METHOD_COLORS[i % METHOD_COLORS.length]}
+              />
+            ))}
           </div>
         </div>
       </div>

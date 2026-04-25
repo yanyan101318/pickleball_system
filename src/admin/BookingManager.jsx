@@ -2,11 +2,16 @@
 import { useState, useEffect } from "react";
 import {
   collection, query, orderBy, onSnapshot, where, getDocs, writeBatch,
-  doc, updateDoc, Timestamp,
+  doc, updateDoc, getDoc, Timestamp,
 } from "firebase/firestore";
 import { db } from "../firebase";
+import { canExtendBooking, EXTEND_OPTIONS } from "../lib/bookingSlots";
+import { roundMoney } from "../lib/bookingMoney";
+import { resolveCustomerPayStatus, PLAN_FULL } from "../lib/bookingPayment";
+import toast from "react-hot-toast";
 
 const STATUS_COLORS = { Pending:"pending", Approved:"approved", Cancelled:"rejected" };
+const PAY_STATUS_BADGE = { paid: "approved", partial: "pending", unpaid: "rejected" };
 
 export default function BookingManager() {
   const [bookings, setBookings] = useState([]);
@@ -15,6 +20,8 @@ export default function BookingManager() {
   const [loading, setLoading]   = useState(true);
   const [acting, setActing]     = useState(null);
   const [selected, setSelected] = useState(null);
+  const [extendHours, setExtendHours] = useState(1);
+  const [extending, setExtending] = useState(false);
 
   useEffect(() => {
     const q = query(collection(db,"bookings"), orderBy("createdAt","desc"));
@@ -35,6 +42,89 @@ export default function BookingManager() {
     } catch(err) { console.error(err); }
     setActing(null);
     setSelected(null);
+  }
+
+  async function applyExtension(b) {
+    const hours = Number(extendHours);
+    if (!Number.isFinite(hours) || hours <= 0) {
+      toast.error("Select extension length");
+      return;
+    }
+    let hourly = Number(b.hourlyRate);
+    if (!Number.isFinite(hourly) || hourly <= 0) {
+      try {
+        const cs = await getDoc(doc(db, "courts", b.courtId));
+        hourly = Number(cs.data()?.pricePerHour) || 0;
+      } catch {
+        hourly = 0;
+      }
+    }
+    if (hourly <= 0) {
+      toast.error("Could not read court hourly rate");
+      return;
+    }
+    const check = canExtendBooking({
+      timeSlot: b.timeSlot,
+      duration: Number(b.duration) || 1,
+      extendHours: hours,
+      courtId: b.courtId,
+      date: b.date,
+      excludeBookingId: b.id,
+      others: bookings,
+    });
+    if (!check.ok) {
+      toast.error(check.reason);
+      return;
+    }
+    const extra = roundMoney(hours * hourly);
+    const prevTotal =
+      Number.isFinite(Number(b.totalAmount)) && Number(b.totalAmount) > 0
+        ? Number(b.totalAmount)
+        : roundMoney(hourly * (Number(b.duration) || 1));
+    const newTotal = roundMoney(prevTotal + extra);
+    const amountPaid = roundMoney(Number(b.amountPaid) || 0);
+    const newRemaining = roundMoney(Math.max(0, newTotal - amountPaid));
+    const payStatus = resolveCustomerPayStatus(b.paymentPlan || PLAN_FULL, newTotal, amountPaid);
+
+    setExtending(true);
+    try {
+      const batch = writeBatch(db);
+      batch.update(doc(db, "bookings", b.id), {
+        duration: check.newDuration,
+        totalAmount: newTotal,
+        remainingBalance: newRemaining,
+        customerPaymentStatus: payStatus,
+        hourlyRate: roundMoney(hourly),
+        extendedAt: Timestamp.now(),
+      });
+      const paySnap = await getDocs(query(collection(db, "payments"), where("bookingId", "==", b.id)));
+      paySnap.forEach((d) => {
+        batch.update(d.ref, {
+          amount: newTotal,
+          totalAmount: newTotal,
+          remainingBalance: newRemaining,
+          customerPaymentStatus: payStatus,
+        });
+      });
+      await batch.commit();
+      toast.success("Booking extended");
+      setSelected((s) =>
+        s && s.id === b.id
+          ? {
+              ...s,
+              duration: check.newDuration,
+              totalAmount: newTotal,
+              remainingBalance: newRemaining,
+              customerPaymentStatus: payStatus,
+              hourlyRate: roundMoney(hourly),
+            }
+          : s
+      );
+    } catch (e) {
+      console.error(e);
+      toast.error("Could not extend booking");
+    }
+    setExtending(false);
   }
 
   async function removeBooking(id) {
@@ -123,7 +213,7 @@ export default function BookingManager() {
             <thead>
               <tr>
                 <th>Player</th><th>Court</th><th>Date</th>
-                <th>Time Slot</th><th>Notes</th><th>Status</th><th>Actions</th>
+                <th>Time</th><th>Pay</th><th>Status</th><th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -136,7 +226,11 @@ export default function BookingManager() {
                   <td>{b.courtName??b.courtId??"—"}</td>
                   <td>{b.date??"—"}</td>
                   <td>{b.timeSlot??"—"}</td>
-                  <td className="ad-td-notes">{b.notes?"📝":"—"}</td>
+                  <td>
+                    <span className={`ad-badge ad-badge-${PAY_STATUS_BADGE[(b.customerPaymentStatus||"").toLowerCase()]??"pending"}`}>
+                      {(b.customerPaymentStatus ?? "—").toString()}
+                    </span>
+                  </td>
                   <td><span className={`ad-badge ad-badge-${STATUS_COLORS[b.status]??"pending"}`}>{b.status??"Pending"}</span></td>
                   <td onClick={e=>e.stopPropagation()}>
                     <div className="ad-action-btns">
@@ -182,14 +276,51 @@ export default function BookingManager() {
             </div>
             <div className="ad-detail-grid">
               <div className="ad-detail-row"><span>Player</span><strong>{selected.playerName??selected.userId??'—'}</strong></div>
+              <div className="ad-detail-row"><span>Contact</span><strong>{selected.contactNumber ?? "—"}</strong></div>
               <div className="ad-detail-row"><span>Court</span><strong>{selected.courtName??selected.courtId??'—'}</strong></div>
               <div className="ad-detail-row"><span>Date</span><strong>{selected.date??'—'}</strong></div>
               <div className="ad-detail-row"><span>Time Slot</span><strong>{selected.timeSlot??'—'}</strong></div>
-              <div className="ad-detail-row"><span>Status</span>
+              <div className="ad-detail-row"><span>Duration</span><strong>{selected.duration ?? "—"} hr</strong></div>
+              <div className="ad-detail-row"><span>Total</span><strong>₱{roundMoney(Number(selected.totalAmount)||0).toFixed(2)}</strong></div>
+              <div className="ad-detail-row"><span>Paid</span><strong>₱{roundMoney(Number(selected.amountPaid)||0).toFixed(2)}</strong></div>
+              <div className="ad-detail-row"><span>Balance</span><strong>₱{roundMoney(Number(selected.remainingBalance)||0).toFixed(2)}</strong></div>
+              <div className="ad-detail-row"><span>Pay status</span>
+                <span className={`ad-badge ad-badge-${PAY_STATUS_BADGE[(selected.customerPaymentStatus||"").toLowerCase()]??"pending"}`}>
+                  {selected.customerPaymentStatus ?? "—"}
+                </span>
+              </div>
+              <div className="ad-detail-row"><span>Booking status</span>
                 <span className={`ad-badge ad-badge-${STATUS_COLORS[selected.status]??"pending"}`}>{selected.status??"Pending"}</span>
               </div>
               {selected.notes && <div className="ad-detail-row ad-detail-full"><span>Notes</span><strong>{selected.notes}</strong></div>}
             </div>
+            {selected.status !== "Cancelled" && (
+              <div className="px-6 py-3 border-t border-slate-800 bg-slate-900/30">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Extend time</p>
+                <div className="flex flex-wrap items-end gap-2">
+                  <div>
+                    <label className="text-[10px] text-slate-500 block mb-1">Add hours</label>
+                    <select
+                      className="ad-search text-sm py-2"
+                      value={extendHours}
+                      onChange={(e) => setExtendHours(Number(e.target.value))}
+                    >
+                      {EXTEND_OPTIONS.map((h) => (
+                        <option key={h} value={h}>+{h} hr</option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    className="ad-btn ad-btn-sm ad-btn-success"
+                    disabled={extending}
+                    onClick={() => applyExtension(selected)}
+                  >
+                    {extending ? "…" : "Extend"}
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="ad-modal-footer ad-modal-footer-between">
               <button
                 type="button"
