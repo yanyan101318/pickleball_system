@@ -1,6 +1,9 @@
 // src/admin/AdminLayout.jsx
 import { useState, useEffect, useRef } from "react";
 import { NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
+import { collection, query, where, onSnapshot } from "firebase/firestore";
+import { db } from "../firebase";
+import toast from "react-hot-toast";
 import { useAuth } from "../auth/AuthContext";
 
 const NAV_LINKS = [
@@ -23,7 +26,7 @@ const TOURNAMENT_SUBLINKS = [
 const NAV_LINKS_AFTER_TOURNAMENT = [
   { to: "/admin/announcements", label: "Announcements" },
   { to: "/admin/analytics",   label: "Analytics"     },
-  { to: "/admin/inventory",   label: "Inventory"     },
+  { to: "/admin/equipment",   label: "Equipment"       },
 ];
 
 const SALES_DROPDOWN_LINKS = [
@@ -42,8 +45,13 @@ export default function AdminLayout() {
   const tournamentRef = useRef(null);
   const bookingRef = useRef(null);
   const salesRef = useRef(null);
+  const notifRef = useRef(null);
+  const notifFirstSnapshot = useRef(true);
   const navigate = useNavigate();
   const location = useLocation();
+
+  const [pendingBookingCount, setPendingBookingCount] = useState(0);
+  const [notifOpen, setNotifOpen] = useState(false);
 
   const tournamentNavActive = TOURNAMENT_SUBLINKS.some((s) => location.pathname === s.to);
   const bookingNavActive = BOOKING_SUBLINKS.some((s) => location.pathname === s.to);
@@ -84,9 +92,37 @@ export default function AdminLayout() {
       if (salesRef.current && !salesRef.current.contains(e.target)) {
         setSalesOpen(false);
       }
+      if (notifRef.current && !notifRef.current.contains(e.target)) {
+        setNotifOpen(false);
+      }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  /** Pending court bookings — badge + toast when a new submission arrives */
+  useEffect(() => {
+    const q = query(collection(db, "bookings"), where("status", "==", "Pending"));
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        setPendingBookingCount(snap.size);
+        if (notifFirstSnapshot.current) {
+          notifFirstSnapshot.current = false;
+          return;
+        }
+        snap.docChanges().forEach((change) => {
+          if (change.type === "added") {
+            const data = change.doc.data();
+            const who = data.playerName || data.contactNumber || "Guest";
+            const court = data.courtName || data.courtId || "Court";
+            toast.success(`New booking: ${who} — ${court}`, { duration: 6000 });
+          }
+        });
+      },
+      (err) => console.error("Booking notifications listener:", err)
+    );
+    return () => unsub();
   }, []);
 
   async function handleLogout() {
@@ -300,13 +336,39 @@ export default function AdminLayout() {
               </span>
             </div>
             <div className="flex items-center gap-1 sm:gap-3">
-              <button
-                type="button"
-                className="p-2 text-slate-400 hover:text-cyan-400 transition-colors shrink-0"
-                aria-label="Notifications"
-              >
-                <span className="material-symbols-outlined text-[22px] sm:text-[24px]">notifications</span>
-              </button>
+              <div className="relative shrink-0" ref={notifRef}>
+                <button
+                  type="button"
+                  className="relative p-2 text-slate-400 hover:text-cyan-400 transition-colors"
+                  aria-label={`Notifications${pendingBookingCount ? `, ${pendingBookingCount} pending bookings` : ""}`}
+                  aria-expanded={notifOpen}
+                  onClick={() => setNotifOpen((o) => !o)}
+                >
+                  <span className="material-symbols-outlined text-[22px] sm:text-[24px]">notifications</span>
+                  {pendingBookingCount > 0 && (
+                    <span className="absolute top-1 right-1 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-cyan-500 text-[10px] font-bold text-slate-950 shadow">
+                      {pendingBookingCount > 99 ? "99+" : pendingBookingCount}
+                    </span>
+                  )}
+                </button>
+                {notifOpen && (
+                  <div className="absolute right-0 top-full mt-2 w-[min(calc(100vw-2rem),280px)] rounded-xl border border-slate-700 bg-[#151e2d] shadow-xl z-[130] py-3 px-3 text-left">
+                    <p className="text-xs font-semibold text-white mb-1">Bookings</p>
+                    <p className="text-[11px] text-slate-400 mb-3">
+                      {pendingBookingCount === 0
+                        ? "No pending approvals."
+                        : `${pendingBookingCount} booking${pendingBookingCount === 1 ? "" : "s"} awaiting approval.`}
+                    </p>
+                    <NavLink
+                      to="/admin/bookings"
+                      className="block text-center rounded-lg bg-cyan-500/15 border border-cyan-500/40 text-cyan-300 text-xs font-semibold py-2 hover:bg-cyan-500/25 transition-colors"
+                      onClick={() => setNotifOpen(false)}
+                    >
+                      Open booking management
+                    </NavLink>
+                  </div>
+                )}
+              </div>
               <div className="flex items-center gap-2 sm:gap-3 pl-2 sm:pl-4 border-l border-slate-800 relative min-w-0">
                 <div
                   className="flex flex-col items-end cursor-pointer min-w-0 max-w-[120px] sm:max-w-none"

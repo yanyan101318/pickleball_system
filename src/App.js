@@ -72,7 +72,8 @@ export default function App() {
             <Route path="tournament"    element={<AdminTournament/>}/>
             <Route path="paddle-stack"  element={<PaddleStackingPage/>}/>
             <Route path="analytics"     element={<Analytics/>}/>
-            <Route path="inventory"     element={<InventoryPage/>}/>
+            <Route path="equipment"     element={<InventoryPage/>}/>
+            <Route path="inventory"       element={<Navigate to="/admin/equipment" replace />}/>
             <Route path="announcements" element={<AnnouncementManager/>}/>
           </Route>
 

@@ -2,7 +2,9 @@ import { useState, useEffect, useMemo } from "react";
 import { collection, query, orderBy, onSnapshot, limit } from "firebase/firestore";
 import { db } from "../firebase";
 import { format } from "date-fns";
+import toast from "react-hot-toast";
 import { buildReceiptHtml, formatReceiptCurrency, printReceiptHtml } from "./posReceipt";
+import { downloadSalesHistoryPdf, downloadPosReceiptPdf } from "../lib/adminPdfReports";
 
 function tsToDate(ts) {
   if (!ts) return null;
@@ -77,6 +79,20 @@ export default function SalesHistoryPage() {
             payments are not listed here.
           </p>
         </div>
+        <button
+          type="button"
+          className="ad-btn ad-btn-primary ad-btn-sm shrink-0"
+          onClick={() => {
+            if (filtered.length === 0) {
+              toast.error("No transactions in the current filters to export.");
+              return;
+            }
+            downloadSalesHistoryPdf(filtered, { dateFrom, dateTo }, tsToDate);
+            toast.success("PDF report downloaded.");
+          }}
+        >
+          Save PDF report
+        </button>
       </div>
 
       <div className="flex flex-col lg:flex-row gap-3 lg:items-end flex-wrap">
@@ -214,9 +230,20 @@ export default function SalesHistoryPage() {
                 </div>
               </div>
             </div>
-            <div className="ad-modal-footer">
+            <div className="ad-modal-footer ad-modal-footer-between flex-wrap gap-2">
               <button type="button" className="ad-btn ad-btn-outline" onClick={() => setDetail(null)}>
                 Close
+              </button>
+              <div className="flex flex-wrap gap-2 justify-end">
+              <button
+                type="button"
+                className="ad-btn ad-btn-outline"
+                onClick={() => {
+                  downloadPosReceiptPdf(detail, tsToDate);
+                  toast.success("Receipt PDF downloaded.");
+                }}
+              >
+                Save PDF
               </button>
               <button
                 type="button"
@@ -236,6 +263,7 @@ export default function SalesHistoryPage() {
               >
                 Print receipt
               </button>
+              </div>
             </div>
           </div>
         </div>

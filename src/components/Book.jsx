@@ -791,7 +791,11 @@ export default function Book() {
                             role="listbox"
                           >
                             {nameSuggestions.map((name) => (
-                              <li key={name} role="option">
+                              <li
+                                key={name}
+                                role="option"
+                                aria-selected={form.playerName.trim() === name.trim()}
+                              >
                                 <button
                                   type="button"
                                   className="book-name-suggestions__item w-full text-left px-3 py-2.5 text-sm font-medium"

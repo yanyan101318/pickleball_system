@@ -34,6 +34,7 @@ import {
   getBorrowBillableRentalHours,
   getBorrowRentalCaption,
 } from "./inventoryHelpers";
+import { downloadEquipmentInventoryPdf } from "../lib/adminPdfReports";
 
 const TABS = [
   { id: "dashboard", label: "Dashboard" },
@@ -489,10 +490,22 @@ export default function InventoryPage() {
     <div className="ad-page">
       <div className="ad-page-header flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
         <div>
-          <h1 className="ad-page-title">Equipment inventory</h1>
+          <h1 className="ad-page-title">Equipment</h1>
           <p className="ad-page-sub">
-            Set rental and overdue rates per item, track borrows, extensions, and charges when gear is returned.
+            Rental catalog, borrows, and overdue tracking for paddles, balls, and other gear.
           </p>
+        </div>
+        <div className="flex flex-wrap gap-2 shrink-0">
+          <button
+            type="button"
+            className="ad-btn ad-btn-outline ad-btn-sm"
+            onClick={() => {
+              downloadEquipmentInventoryPdf({ items, stats });
+              toast.success("PDF report downloaded.");
+            }}
+          >
+            Save PDF report
+          </button>
         </div>
       </div>
 
