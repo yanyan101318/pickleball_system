@@ -147,9 +147,9 @@ export default function LoginPage() {
           </form>
 
           <div className="auth-card-footer">
-            Don&apos;t have an account?{" "}
+          Access restricted.{" "}
             <button type="button" className="auth-link auth-link-btn" onClick={openRegisterModal}>
-              Register here
+            Request Admin Credentials
             </button>
           </div>
         </div>

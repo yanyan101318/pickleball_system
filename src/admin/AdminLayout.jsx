@@ -187,18 +187,6 @@ export default function AdminLayout() {
               <div
                 className="relative"
                 ref={salesRef}
-                onMouseEnter={() => {
-                  if (typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches) {
-                    setBookingOpen(false);
-                    setTournamentOpen(false);
-                    setSalesOpen(true);
-                  }
-                }}
-                onMouseLeave={() => {
-                  if (typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches) {
-                    setSalesOpen(false);
-                  }
-                }}
               >
                 <button
                   type="button"

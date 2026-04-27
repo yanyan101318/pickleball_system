@@ -7,6 +7,22 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 
+const CUSTOMER_PAY_BADGE = { paid: "approved", partial: "pending", unpaid: "rejected" };
+
+function toMoney(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n.toFixed(2) : "0.00";
+}
+
+function deriveCustomerStatus(row) {
+  const explicit = String(row?.customerPaymentStatus || "").toLowerCase().trim();
+  if (explicit === "paid" || explicit === "partial" || explicit === "unpaid") return explicit;
+  const paid = Number(row?.amountPaid) || 0;
+  const rem = Number(row?.remainingBalance);
+  if (Number.isFinite(rem)) return rem <= 0 ? "paid" : paid > 0 ? "partial" : "unpaid";
+  return paid > 0 ? "partial" : "unpaid";
+}
+
 export default function PaymentReview() {
   const [searchParams] = useSearchParams();
   const view = searchParams.get("view") || "booking";
@@ -125,7 +141,9 @@ export default function PaymentReview() {
       {/* Payment cards */}
       <div className="pr-grid">
         {filtered.length===0 && <div className="ad-empty">No payments found.</div>}
-        {filtered.map(p=>(
+        {filtered.map((p) => {
+          const payState = deriveCustomerStatus(p);
+          return (
           <div key={p.id} className="pr-card">
             {/* Screenshot preview */}
             <div className="pr-img-wrap" onClick={()=>setPreview(p)}>
@@ -141,11 +159,27 @@ export default function PaymentReview() {
               <div className="pr-name">{p.name ?? "Unknown"}</div>
               <div className="pr-meta">
                 <span> {p.method ?? "—"}</span>
-                <span>₱{p.amount ?? "—"}</span>
+                <span>Txn: ₱{toMoney(p.amount)}</span>
               </div>
               <div className="pr-meta">
                 <span>📅 {p.date ?? "—"}</span>
                 <span> {p.courtName ?? p.courtId ?? "—"}</span>
+              </div>
+              <div className="pr-meta">
+                <span>Paid: ₱{toMoney(p.amountPaid)}</span>
+                <span>Bal: ₱{toMoney(p.remainingBalance)}</span>
+              </div>
+              <div className="pr-meta">
+                <span className={`ad-badge ad-badge-${CUSTOMER_PAY_BADGE[payState] ?? "pending"}`}>
+                  {payState}
+                </span>
+                <span className="text-[11px] text-slate-400">
+                  {p.paymentPlan === "downpayment"
+                    ? "Down payment"
+                    : p.paymentPlan === "pay_later"
+                      ? "Pay later"
+                      : "Full payment"}
+                </span>
               </div>
               <span className={`ad-badge ad-badge-${statusColor[p.paymentStatus]??"pending"}`}>
                 {p.paymentStatus ?? "Pending"}
@@ -178,7 +212,8 @@ export default function PaymentReview() {
               </button>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Image preview modal */}
@@ -196,12 +231,22 @@ export default function PaymentReview() {
                 <div className="pr-no-img" style={{height:200}}>No image uploaded</div>
               )}
               <div className="ad-detail-grid" style={{marginTop:"1rem"}}>
+                {(() => {
+                  const payState = deriveCustomerStatus(preview);
+                  return (
+                    <>
                 <div className="ad-detail-row"><span>Name</span><strong>{preview.name}</strong></div>
-                <div className="ad-detail-row"><span>Amount</span><strong>₱{preview.amount}</strong></div>
+                <div className="ad-detail-row"><span>Transaction amount</span><strong>₱{toMoney(preview.amount)}</strong></div>
+                <div className="ad-detail-row"><span>Total paid</span><strong>₱{toMoney(preview.amountPaid)}</strong></div>
+                <div className="ad-detail-row"><span>Remaining balance</span><strong>₱{toMoney(preview.remainingBalance)}</strong></div>
+                <div className="ad-detail-row"><span>Customer pay status</span><strong className="capitalize">{payState}</strong></div>
                 <div className="ad-detail-row"><span>Method</span><strong>{preview.method}</strong></div>
                 <div className="ad-detail-row"><span>Court</span><strong>{preview.courtName??preview.courtId}</strong></div>
                 <div className="ad-detail-row"><span>Date</span><strong>{preview.date}</strong></div>
                 <div className="ad-detail-row"><span>Time</span><strong>{preview.timeSlot}</strong></div>
+                    </>
+                  );
+                })()}
               </div>
             </div>
             <div className="ad-modal-footer ad-modal-footer-between">

@@ -36,6 +36,31 @@ export function indicesOverlap(a, b) {
   return false;
 }
 
+/** pending / approved bookings count as holding the court (case-insensitive). */
+export function isActiveBookingStatus(status) {
+  const x = String(status || "").toLowerCase();
+  return x === "pending" || x === "approved";
+}
+
+/**
+ * True if the user can start a new booking at `timeSlot` for `durationHours` without
+ * overlapping any existing same-court, same-day booking.
+ */
+export function isSlotStartAvailableForDuration(timeSlot, durationHours, existingBookings) {
+  const mine = occupiedSlotIndices(timeSlot, durationHours);
+  if (mine.length === 0) return false;
+  const start = slotStartIndex(timeSlot);
+  if (start < 0) return false;
+  if (start + mine.length > TIME_SLOTS.length) return false;
+  for (const ob of existingBookings) {
+    if (!ob) continue;
+    if (!isActiveBookingStatus(ob.status)) continue;
+    const oidx = occupiedSlotIndices(ob.timeSlot, ob.duration ?? 1);
+    if (oidx.length && indicesOverlap(mine, oidx)) return false;
+  }
+  return true;
+}
+
 /**
  * @param {object} p
  * @param {string} p.timeSlot
@@ -61,15 +86,10 @@ export function canExtendBooking(p) {
     return { ok: false, reason: "Extension would go past the last available slot." };
   }
 
-  const active = (s) => {
-    const x = String(s || "").toLowerCase();
-    return x === "pending" || x === "approved";
-  };
-
   for (const ob of others || []) {
     if (!ob || ob.id === excludeBookingId) continue;
     if (ob.courtId !== courtId || ob.date !== date) continue;
-    if (!active(ob.status)) continue;
+    if (!isActiveBookingStatus(ob.status)) continue;
     const oidx = occupiedSlotIndices(ob.timeSlot, ob.duration ?? 1);
     if (oidx.length && indicesOverlap(myIdx, oidx)) {
       return { ok: false, reason: "The next time is already booked." };

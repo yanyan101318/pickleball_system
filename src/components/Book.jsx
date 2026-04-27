@@ -11,6 +11,7 @@ import {
   getDocs,
   serverTimestamp,
   onSnapshot,
+  limit,
 } from "firebase/firestore";
 import { Link } from "react-router-dom";
 import {
@@ -20,7 +21,7 @@ import {
 import toast from "react-hot-toast";
 import { format, addDays } from "date-fns";
 import { roundMoney, parseCashAmount, parseAmountPaid } from "../lib/bookingMoney";
-import { TIME_SLOTS } from "../lib/bookingSlots";
+import { TIME_SLOTS, isSlotStartAvailableForDuration } from "../lib/bookingSlots";
 import {
   PLAN_FULL,
   PLAN_PARTIAL,
@@ -43,12 +44,6 @@ function deriveCourtKind(c) {
 
 const DURATIONS = [1, 1.5, 2, 2.5, 3, 4];
 
-const EQUIPMENT = [
-  { id: "paddle", name: "Paddle Rental", price: 80, icon: "🏓" },
-  { id: "balls", name: "Ball Set (3 balls)", price: 50, icon: "🟡" },
-  { id: "coach", name: "Coach (1 hour)", price: 500, icon: "👨‍🏫" },
-];
-
 const PROMOS = [
   { code: "PICKLE10", discount: 0.1, label: "10% off" },
   { code: "NEWUSER", discount: 0.15, label: "15% off for new users" },
@@ -67,10 +62,23 @@ export default function Book() {
   const courtParam = searchParams.get("court");
   const fileInputRef = useRef();
 
+  /** Rental add-ons: prefer `price`, fall back to legacy inventory `pricePerHour`. */
+  function getRentalItemPrice(item) {
+    const p = item?.price;
+    if (p != null && Number.isFinite(Number(p))) return Number(p);
+    return Number(item?.pricePerHour) || 0;
+  }
+
   const [courts, setCourts] = useState([]);
   const [courtsReady, setCourtsReady] = useState(false);
   const [step, setStep] = useState(1);
-  const [bookedSlots, setBookedSlots] = useState([]);
+  /** Same court + day: { id, timeSlot, duration, status } for overlap checks */
+  const [dayBookings, setDayBookings] = useState([]);
+  const [rentalAddOns, setRentalAddOns] = useState([]);
+  const [nameSuggestions, setNameSuggestions] = useState([]);
+  const [nameSuggestOpen, setNameSuggestOpen] = useState(false);
+  const [debouncedPlayerName, setDebouncedPlayerName] = useState("");
+  const nameSuggestRef = useRef(null);
   const [promoInput, setPromoInput] = useState("");
   const [appliedPromo, setAppliedPromo] = useState(null);
   const [paymentImg, setPaymentImg] = useState(null);
@@ -141,7 +149,7 @@ export default function Book() {
     });
   }, [activeCourts, courtParam]);
 
-  const loadBookedSlots = useCallback(async () => {
+  const loadDayBookings = useCallback(async () => {
     if (!form.courtId) return;
     try {
       const q = query(
@@ -151,10 +159,18 @@ export default function Book() {
         where("status", "in", ["pending", "approved", "Pending", "Approved"])
       );
       const snap = await getDocs(q);
-      const slots = snap.docs.map((d) => d.data().timeSlot);
-      setBookedSlots(slots);
+      const list = snap.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          timeSlot: data.timeSlot,
+          duration: Number(data.duration) || 1,
+          status: data.status,
+        };
+      });
+      setDayBookings(list);
     } catch {
-      setBookedSlots([]);
+      setDayBookings([]);
     }
   }, [form.courtId, form.date]);
 
@@ -164,16 +180,133 @@ export default function Book() {
       return;
     }
     if (!form.courtId) return;
-    loadBookedSlots();
-  }, [form.courtId, form.date, user, adminMode, navigate, loadBookedSlots]);
+    loadDayBookings();
+  }, [form.courtId, form.date, user, adminMode, navigate, loadDayBookings]);
+
+  /**
+   * Real-time add-ons from `inventoryItems`.
+   * - If `type` is present, only accept `type: "rental"`.
+   * - Legacy items without `type` are treated as rental add-ons when they have a price.
+   */
+  useEffect(() => {
+    const unsub = onSnapshot(
+      collection(db, "inventoryItems"),
+      (snap) => {
+        const all = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setRentalAddOns(
+          all.filter((it) => {
+            const typeRaw = String(it.type ?? "").trim().toLowerCase();
+            const hasType = typeRaw.length > 0;
+            const hasPrice =
+              Number.isFinite(Number(it.price)) || Number.isFinite(Number(it.pricePerHour));
+            const availableQty = Number(it.availableQty);
+            const hasStock = !Number.isFinite(availableQty) || availableQty > 0;
+            if (hasType) return typeRaw === "rental" && hasPrice && hasStock;
+            return hasPrice && hasStock;
+          })
+        );
+      },
+      () => setRentalAddOns([])
+    );
+    return () => unsub();
+  }, []);
+
+  /** Debounce player name for Firestore prefix search (admin autocomplete). */
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedPlayerName(String(form.playerName || "")), 300);
+    return () => clearTimeout(t);
+  }, [form.playerName]);
+
+  /** Firestore: customers by fullName + bookings by playerName, merged and deduped. */
+  useEffect(() => {
+    if (!adminMode) {
+      setNameSuggestions([]);
+      return;
+    }
+    const q = debouncedPlayerName.trim();
+    if (q.length < 1) {
+      setNameSuggestions([]);
+      return;
+    }
+    let cancelled = false;
+    const end = q + "\uf8ff";
+    (async () => {
+      try {
+        const [cSnap, bSnap] = await Promise.all([
+          getDocs(
+            query(
+              collection(db, "customers"),
+              where("fullName", ">=", q),
+              where("fullName", "<=", end),
+              limit(8)
+            )
+          ),
+          getDocs(
+            query(
+              collection(db, "bookings"),
+              where("playerName", ">=", q),
+              where("playerName", "<=", end),
+              limit(8)
+            )
+          ),
+        ]);
+        if (cancelled) return;
+        const map = new Map();
+        cSnap.forEach((docSnap) => {
+          const n = String(docSnap.data().fullName || "").trim();
+          if (n) map.set(n.toLowerCase(), n);
+        });
+        bSnap.forEach((docSnap) => {
+          const n = String(docSnap.data().playerName || "").trim();
+          if (n) map.set(n.toLowerCase(), n);
+        });
+        setNameSuggestions([...map.values()].sort((a, b) => a.localeCompare(b)));
+      } catch (e) {
+        console.error(e);
+        if (!cancelled) setNameSuggestions([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [adminMode, debouncedPlayerName]);
 
   useEffect(() => {
     if (adminMode) return;
     if (profile?.name) setForm((f) => ({ ...f, playerName: profile.name }));
   }, [profile, adminMode]);
 
-  const equipmentItems = EQUIPMENT.filter((e) => form.equipment.includes(e.id));
-  const equipmentTotal = equipmentItems.reduce((s, e) => s + e.price, 0);
+  /**
+   * When duration changes or we load overlapping bookings from Firestore, clear an
+   * impossible start time (e.g. a 3h booking at noon blocks 12:00–2:00 as starts).
+   */
+  useEffect(() => {
+    setForm((f) => {
+      if (!f.timeSlot) return f;
+      if (isSlotStartAvailableForDuration(f.timeSlot, f.duration, dayBookings)) return f;
+      return { ...f, timeSlot: "" };
+    });
+  }, [form.duration, dayBookings]);
+
+  /** Drop invalid add-on ids once we know the rental list (avoids clearing selection before snapshot). */
+  useEffect(() => {
+    if (rentalAddOns.length === 0) return;
+    const ids = new Set(rentalAddOns.map((r) => r.id));
+    setForm((f) => {
+      const next = f.equipment.filter((id) => ids.has(id));
+      if (next.length === f.equipment.length) return f;
+      return { ...f, equipment: next };
+    });
+  }, [rentalAddOns]);
+
+  const equipmentItems = useMemo(
+    () => rentalAddOns.filter((e) => form.equipment.includes(e.id)),
+    [rentalAddOns, form.equipment]
+  );
+  const equipmentTotal = useMemo(
+    () => equipmentItems.reduce((s, e) => s + getRentalItemPrice(e), 0),
+    [equipmentItems]
+  );
   const courtTotal = (court?.price ?? 0) * form.duration;
   const subtotal = courtTotal + equipmentTotal;
   const discount = appliedPromo ? subtotal * appliedPromo.discount : 0;
@@ -296,6 +429,31 @@ export default function Book() {
     setSubmitting(true);
 
     try {
+      // Re-check overlaps against latest data so two admins cannot double-book the same range.
+      const confSnap = await getDocs(
+        query(
+          collection(db, "bookings"),
+          where("courtId", "==", form.courtId),
+          where("date", "==", form.date),
+          where("status", "in", ["pending", "approved", "Pending", "Approved"])
+        )
+      );
+      const latestDay = confSnap.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          timeSlot: data.timeSlot,
+          duration: Number(data.duration) || 1,
+          status: data.status,
+        };
+      });
+      if (!isSlotStartAvailableForDuration(form.timeSlot, form.duration, latestDay)) {
+        setDayBookings(latestDay);
+        toast.error("That time is no longer available. Please choose another slot.");
+        setSubmitting(false);
+        return;
+      }
+
       let receiptUrl = null;
       if (needGcashProof && paymentImg) {
         receiptUrl = await new Promise((resolve, reject) => {
@@ -602,16 +760,54 @@ export default function Book() {
                     <User size={18} className="text-green-400" /> Player Information
                   </h3>
                   <div className="grid sm:grid-cols-2 gap-4">
-                    <div>
+                    <div className={adminMode ? "sm:col-span-2" : ""}>
                       <label className="label">Player Name</label>
-                      <input
-                        type="text"
-                        required
-                        className="input-field"
-                        placeholder="Full name"
-                        value={form.playerName}
-                        onChange={(e) => setForm({ ...form, playerName: e.target.value })}
-                      />
+                      <div className={adminMode ? "relative" : undefined}>
+                        <input
+                          type="text"
+                          required
+                          className="input-field"
+                          placeholder="Full name"
+                          autoComplete={adminMode ? "off" : "name"}
+                          value={form.playerName}
+                          onChange={(e) => {
+                            setForm({ ...form, playerName: e.target.value });
+                            if (adminMode) setNameSuggestOpen(true);
+                          }}
+                          onFocus={() => adminMode && setNameSuggestOpen(true)}
+                          onBlur={() => {
+                            if (!adminMode) return;
+                            setTimeout(() => {
+                              if (!nameSuggestRef.current?.contains(document.activeElement)) {
+                                setNameSuggestOpen(false);
+                              }
+                            }, 150);
+                          }}
+                        />
+                        {adminMode && nameSuggestOpen && nameSuggestions.length > 0 && (
+                          <ul
+                            ref={nameSuggestRef}
+                            className="book-name-suggestions absolute left-0 right-0 top-full z-[300] mt-1.5 max-h-48 overflow-y-auto rounded-lg py-1"
+                            role="listbox"
+                          >
+                            {nameSuggestions.map((name) => (
+                              <li key={name} role="option">
+                                <button
+                                  type="button"
+                                  className="book-name-suggestions__item w-full text-left px-3 py-2.5 text-sm font-medium"
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => {
+                                    setForm((f) => ({ ...f, playerName: name }));
+                                    setNameSuggestOpen(false);
+                                  }}
+                                >
+                                  {name}
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
                     </div>
                     <div>
                       <label className="label">Number of Players</label>
@@ -681,10 +877,16 @@ export default function Book() {
                   <label className="label">Available Time Slots</label>
                   <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                     {TIME_SLOTS.map((slot) => {
-                      const isBooked = bookedSlots.includes(slot);
+                      const available = isSlotStartAvailableForDuration(
+                        slot,
+                        form.duration,
+                        dayBookings
+                      );
+                      const isBooked = !available;
                       return (
                         <button
                           key={slot}
+                          type="button"
                           disabled={isBooked}
                           onClick={() => setForm({ ...form, timeSlot: slot })}
                           className={`py-2.5 px-3 rounded-xl text-xs font-medium transition-all ${
@@ -694,7 +896,7 @@ export default function Book() {
                           }`}
                         >
                           {slot}
-                          {isBooked && <div className="text-xs">Booked</div>}
+                          {isBooked && <div className="text-[10px] leading-tight mt-0.5">Booked</div>}
                         </button>
                       );
                     })}
@@ -725,30 +927,40 @@ export default function Book() {
                 </h3>
                 <p className="text-slate-500 text-sm mb-5">Optional extras to enhance your session</p>
                 <div className="space-y-3">
-                  {EQUIPMENT.map((item) => (
-                    <button
-                      key={item.id}
-                      onClick={() => toggleEquipment(item.id)}
-                      className={`w-full flex items-center justify-between p-4 rounded-xl border transition-all ${
-                        form.equipment.includes(item.id)
-                          ? "border-green-500 bg-green-500/10"
-                          : "border-slate-700 bg-slate-800 hover:border-slate-600"
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="text-2xl">{item.icon}</span>
-                        <div className="text-left">
-                          <div className="text-white font-medium">{item.name}</div>
-                          <div className="text-slate-500 text-sm">₱{item.price} per session</div>
-                        </div>
-                      </div>
-                      <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
-                        form.equipment.includes(item.id) ? "border-green-500 bg-green-500" : "border-slate-600"
-                      }`}>
-                        {form.equipment.includes(item.id) && <Check size={12} className="text-slate-950" />}
-                      </div>
-                    </button>
-                  ))}
+                  {rentalAddOns.length === 0 ? (
+                    <p className="text-slate-500 text-sm py-4 text-center border border-dashed border-slate-700 rounded-xl">
+                      No add-ons available yet. Add priced inventory items (or set type to "rental").
+                    </p>
+                  ) : (
+                    rentalAddOns.map((item) => {
+                      const price = getRentalItemPrice(item);
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => toggleEquipment(item.id)}
+                          className={`w-full flex items-center justify-between p-4 rounded-xl border transition-all ${
+                            form.equipment.includes(item.id)
+                              ? "border-green-500 bg-green-500/10"
+                              : "border-slate-700 bg-slate-800 hover:border-slate-600"
+                          }`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <Package className="text-slate-400 shrink-0" size={28} strokeWidth={1.5} />
+                            <div className="text-left min-w-0">
+                              <div className="text-white font-medium truncate">{item.name || "Rental"}</div>
+                              <div className="text-slate-500 text-sm">₱{price.toLocaleString()} per session</div>
+                            </div>
+                          </div>
+                          <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
+                            form.equipment.includes(item.id) ? "border-green-500 bg-green-500" : "border-slate-600"
+                          }`}>
+                            {form.equipment.includes(item.id) && <Check size={12} className="text-slate-950" />}
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
                 </div>
 
                 {/* Promo Code */}
@@ -1079,9 +1291,9 @@ export default function Book() {
                   <div>
                     <div className="text-slate-500 text-xs mb-1">Equipment</div>
                     {equipmentItems.map((e) => (
-                      <div key={e.id} className="flex justify-between text-slate-300 text-xs">
-                        <span>{e.icon} {e.name}</span>
-                        <span>₱{e.price}</span>
+                      <div key={e.id} className="flex justify-between text-slate-300 text-xs gap-2">
+                        <span className="truncate">{e.name}</span>
+                        <span className="shrink-0">₱{getRentalItemPrice(e).toLocaleString()}</span>
                       </div>
                     ))}
                   </div>
